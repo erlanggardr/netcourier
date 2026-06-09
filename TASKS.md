@@ -6,14 +6,14 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 0 - Project Setup
 
-- [ ] Buat struktur folder project.
-- [ ] Buat `common/protocol.py`.
-- [ ] Buat `common/constants.py`.
-- [ ] Buat `common/errors.py`.
-- [ ] Setup logging dasar.
-- [ ] Setup database connection.
-- [ ] Buat migration/DDL database awal.
-- [ ] Buat config `.env.example`.
+- [x] Buat struktur folder project.
+- [x] Buat `common/protocol.py`.
+- [x] Buat `common/constants.py`.
+- [x] Buat `common/errors.py`.
+- [x] Setup logging dasar.
+- [x] Setup database connection.
+- [x] Buat migration/DDL database awal.
+- [x] Buat config `.env.example`.
 
 ---
 
