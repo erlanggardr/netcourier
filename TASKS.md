@@ -19,43 +19,40 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 1 - Protocol Core
 
-- [ ] Implement length-prefixed packet framing.
-- [ ] Implement JSON header encode/decode.
-- [ ] Implement binary payload support.
-- [ ] Implement request_id generator.
-- [ ] Implement error packet builder.
-- [ ] Test send/receive packet tanpa binary.
-- [ ] Test send/receive packet dengan binary payload.
-
----
-
+- [x] Implement length-prefixed packet framing.
+- [x] Implement JSON header encode/decode.
+- [x] Implement binary payload support.
+- [x] Implement request_id generator.
+- [x] Implement error packet builder.
+- [x] Test send/receive packet tanpa binary.
+- [x] Test send/receive packet dengan binary payload.
 
 ---
 
 ## Phase 2A - Tkinter Client Shell
 
-- [ ] Buat `client/main.py` sebagai entry point Tkinter.
-- [ ] Buat `client/app.py` untuk class utama aplikasi.
-- [ ] Buat Login/Register view.
-- [ ] Buat Waiting Room view.
-- [ ] Buat Room Chat view.
-- [ ] Buat reusable widgets untuk status bar, message list, user list, room list, file list, dan transfer progress.
-- [ ] Implement UI event queue menggunakan `queue.Queue`.
-- [ ] Implement `root.after(...)` untuk polling event queue.
-- [ ] Pastikan GUI tidak freeze saat koneksi Gateway berjalan.
+- [x] Buat `client/main.py` sebagai entry point Tkinter.
+- [x] Buat `client/app.py` untuk class utama aplikasi.
+- [x] Buat Login/Register view.
+- [x] Buat Waiting Room view.
+- [x] Buat Room Chat view.
+- [x] Buat reusable widgets untuk status bar, message list, user list, room list, file list, dan transfer progress.
+- [x] Implement UI event queue menggunakan `queue.Queue`.
+- [x] Implement `root.after(...)` untuk polling event queue.
+- [x] Pastikan GUI tidak freeze saat koneksi Gateway berjalan.
 
 ## Phase 2 - Gateway Basic
 
-- [ ] Buat Gateway TCP server client-facing port 9000.
-- [ ] Buat threading handler untuk client.
-- [ ] Implement `REGISTER`.
-- [ ] Implement password hashing.
-- [ ] Implement `LOGIN`.
-- [ ] Implement session token.
-- [ ] Implement `LOGOUT`.
-- [ ] Implement duplicate login handling.
-- [ ] Implement `PING/PONG`.
-- [ ] Simpan log Gateway.
+- [x] Buat Gateway TCP server client-facing port 9000.
+- [x] Buat threading handler untuk client.
+- [x] Implement `REGISTER`.
+- [x] Implement password hashing.
+- [x] Implement `LOGIN`.
+- [x] Implement session token.
+- [x] Implement `LOGOUT`.
+- [x] Implement duplicate login handling.
+- [x] Implement `PING/PONG`.
+- [x] Simpan log Gateway.
 
 ---
 
