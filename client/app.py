@@ -7,6 +7,7 @@ import threading
 from client.auth_view import AuthView
 from client.waiting_view import WaitingView
 from client.room_view import RoomView
+from client.gateway_connection import GatewayConnection
 
 class NetCourierApp:
     def __init__(self, gateway_host, gateway_port):
@@ -25,6 +26,9 @@ class NetCourierApp:
         self.current_user = None
         self.token = None
         self.current_view = None
+        
+        # Networking
+        self.gateway_conn = GatewayConnection(gateway_host, gateway_port, self)
         
         # Setup styles
         self._setup_styles()
@@ -97,5 +101,20 @@ class NetCourierApp:
 
     def cleanup(self):
         self.logger.info("Cleaning up application...")
-        # Close any open connections here
+        self.gateway_conn.disconnect()
         self.root.destroy()
+
+    def on_gateway_disconnected(self):
+        messagebox.showwarning("Connection Lost", "Connection to Gateway was lost.")
+        self.show_login_register()
+
+    def show_error(self, message):
+        messagebox.showerror("Error", message)
+
+    def on_pm_received(self, payload):
+        # Forward to waiting view if active
+        if isinstance(self.current_view, WaitingView):
+            self.current_view.on_pm_received(payload)
+        else:
+            # Maybe show a notification?
+            self.logger.info(f"PM received from {payload.get('from_username')}: {payload.get('message')}")

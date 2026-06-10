@@ -19,16 +19,13 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 1 - Protocol Core
 
-- [ ] Implement length-prefixed packet framing.
-- [ ] Implement JSON header encode/decode.
-- [ ] Implement binary payload support.
-- [ ] Implement request_id generator.
-- [ ] Implement error packet builder.
-- [ ] Test send/receive packet tanpa binary.
-- [ ] Test send/receive packet dengan binary payload.
-
----
-
+- [x] Implement length-prefixed packet framing.
+- [x] Implement JSON header encode/decode.
+- [x] Implement binary payload support.
+- [x] Implement request_id generator.
+- [x] Implement error packet builder.
+- [x] Test send/receive packet tanpa binary.
+- [x] Test send/receive packet dengan binary payload.
 
 ---
 
@@ -46,16 +43,16 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 2 - Gateway Basic
 
-- [ ] Buat Gateway TCP server client-facing port 9000.
-- [ ] Buat threading handler untuk client.
-- [ ] Implement `REGISTER`.
-- [ ] Implement password hashing.
-- [ ] Implement `LOGIN`.
-- [ ] Implement session token.
-- [ ] Implement `LOGOUT`.
-- [ ] Implement duplicate login handling.
-- [ ] Implement `PING/PONG`.
-- [ ] Simpan log Gateway.
+- [x] Buat Gateway TCP server client-facing port 9000.
+- [x] Buat threading handler untuk client.
+- [x] Implement `REGISTER`.
+- [x] Implement password hashing.
+- [x] Implement `LOGIN`.
+- [x] Implement session token.
+- [x] Implement `LOGOUT`.
+- [x] Implement duplicate login handling.
+- [x] Implement `PING/PONG`.
+- [x] Simpan log Gateway.
 
 ---
 

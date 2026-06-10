@@ -39,18 +39,56 @@ class AuthView(ttk.Frame):
             messagebox.showerror("Error", "Please enter both username and password")
             return
         
+        if not self.app.gateway_conn.running:
+            if not self.app.gateway_conn.connect():
+                messagebox.showerror("Error", "Could not connect to Gateway")
+                return
+
         self.app.logger.info(f"Attempting login for user: {username}")
-        # In a real implementation, this would start a background thread to talk to Gateway
-        # For now, we simulate success
-        self.app.on_login_success(username, "dummy_token")
+        self.login_btn.config(state=tk.DISABLED)
+        
+        self.app.gateway_conn.send_request(
+            "LOGIN", 
+            {"username": username, "password": password},
+            callback=self._on_login_response
+        )
+
+    def _on_login_response(self, header):
+        self.login_btn.config(state=tk.NORMAL)
+        if header["type"] == "LOGIN_OK":
+            payload = header["payload"]
+            self.app.on_login_success(payload["username"], header["token"])
+        else:
+            error_msg = header["payload"].get("message", "Login failed")
+            messagebox.showerror("Login Error", error_msg)
 
     def on_register(self):
         username = self.username_entry.get()
         password = self.password_entry.get()
+        display_name = username # Simplification
+        
         if not username or not password:
             messagebox.showerror("Error", "Please enter both username and password")
             return
-        
+
+        if not self.app.gateway_conn.running:
+            if not self.app.gateway_conn.connect():
+                messagebox.showerror("Error", "Could not connect to Gateway")
+                return
+
         self.app.logger.info(f"Attempting registration for user: {username}")
-        # Simulate registration success
-        messagebox.showinfo("Success", "Registration successful! You can now login.")
+        self.register_btn.config(state=tk.DISABLED)
+        
+        self.app.gateway_conn.send_request(
+            "REGISTER",
+            {"username": username, "password": password, "display_name": display_name},
+            callback=self._on_register_response
+        )
+
+    def _on_register_response(self, header):
+        self.register_btn.config(state=tk.NORMAL)
+        if header["type"] == "REGISTER_OK":
+            messagebox.showinfo("Success", "Registration successful! You can now login.")
+        else:
+            error_msg = header["payload"].get("message", "Registration failed")
+            messagebox.showerror("Registration Error", error_msg)
