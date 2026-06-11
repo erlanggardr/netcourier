@@ -72,16 +72,16 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 4 - Backend Registry and Load Balancing
 
-- [ ] Buat Gateway backend-control port 9001.
-- [ ] Implement `REGISTER_BACKEND`.
-- [ ] Implement `HEARTBEAT`.
-- [ ] Simpan backend status.
-- [ ] Implement backend down detection.
-- [ ] Implement load balancing score.
-- [ ] Implement room_mapping.
-- [ ] Implement `CREATE_ROOM`.
-- [ ] Implement `JOIN_ROOM` returning server location.
-- [ ] Test room affinity S1/S2.
+- [x] Buat Gateway backend-control port 9001.
+- [x] Implement `REGISTER_BACKEND`.
+- [x] Implement `HEARTBEAT`.
+- [x] Simpan backend status.
+- [x] Implement backend down detection.
+- [x] Implement load balancing score.
+- [x] Implement room_mapping.
+- [x] Implement `CREATE_ROOM`.
+- [x] Implement `JOIN_ROOM` returning server location.
+- [x] Test room affinity S1/S2.
 
 ---
 

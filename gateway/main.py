@@ -18,6 +18,9 @@ from common.logging_config import setup_logging
 from gateway.auth_service import AuthService
 from gateway.presence_service import PresenceService
 from gateway.pm_service import PMService
+from gateway.backend_service import BackendService
+from gateway.load_balancer import LoadBalancer
+from gateway.room_directory import RoomDirectoryService
 
 class Gateway:
     def __init__(self, host, client_port, backend_port):
@@ -29,6 +32,10 @@ class Gateway:
         self.auth_service = AuthService()
         self.presence_service = PresenceService()
         self.pm_service = PMService()
+        
+        self.backend_service = BackendService()
+        self.load_balancer = LoadBalancer(self.backend_service)
+        self.room_directory = RoomDirectoryService(self.load_balancer, self.backend_service)
         
         # session_token -> {user_id, username, socket, last_seen}
         self.active_sessions = {}
@@ -62,6 +69,7 @@ class Gateway:
     def stop(self):
         self.logger.info("Stopping Gateway...")
         self.running = False
+        self.backend_service.stop()
 
     def _run_client_server(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -125,6 +133,12 @@ class Gateway:
                             self._handle_private_message_send(conn, req_id, json_payload, user_id, username)
                         elif msg_type == "PM_HISTORY_REQUEST":
                             self._handle_pm_history_request(conn, req_id, json_payload, user_id)
+                        elif msg_type == "LIST_ROOMS":
+                            self._handle_list_rooms(conn, req_id)
+                        elif msg_type == "CREATE_ROOM":
+                            self._handle_create_room(conn, req_id, json_payload, user_id)
+                        elif msg_type == "JOIN_ROOM":
+                            self._handle_join_room(conn, req_id, json_payload)
                         else:
                             self.logger.warning(f"Unhandled message type: {msg_type}")
                         
@@ -263,10 +277,81 @@ class Gateway:
             "messages": history
         }, request_id=req_id))
 
+    def _handle_list_rooms(self, conn, req_id):
+        rooms = self.room_directory.get_room_list()
+        send_packet(conn, build_packet("ROOM_LIST_RESPONSE", {"rooms": rooms}, request_id=req_id))
+
+    def _handle_create_room(self, conn, req_id, payload, user_id):
+        room_name = payload.get("room_name")
+        description = payload.get("description", "")
+        
+        success, error_code, data = self.room_directory.create_room(room_name, description, user_id)
+        if success:
+            send_packet(conn, build_packet("ROOM_ASSIGNED", data, request_id=req_id))
+        else:
+            send_packet(conn, build_error_packet(error_code, request_id=req_id))
+
+    def _handle_join_room(self, conn, req_id, payload):
+        room_name = payload.get("room_name")
+        
+        success, error_code, data = self.room_directory.join_room(room_name)
+        if success:
+            send_packet(conn, build_packet("ROOM_LOCATION", data, request_id=req_id))
+        else:
+            send_packet(conn, build_error_packet(error_code, request_id=req_id))
+
     def _handle_backend(self, conn, addr):
         self.logger.info(f"New backend connection from {addr}")
-        # To be implemented in Phase 4
-        conn.close()
+        current_server_id = None
+        try:
+            with conn:
+                while self.running:
+                    header, binary_payload = receive_packet(conn)
+                    msg_type = header.get("type")
+                    req_id = header.get("request_id")
+                    payload = header.get("payload", {})
+                    
+                    if msg_type == "REGISTER_BACKEND":
+                        server_id = payload.get("server_id")
+                        host = payload.get("host")
+                        port = payload.get("port")
+                        self.backend_service.register_backend(server_id, host, port, conn)
+                        current_server_id = server_id
+                        send_packet(conn, build_packet("BACKEND_REGISTERED", request_id=req_id))
+                        
+                    elif msg_type == "HEARTBEAT":
+                        server_id = payload.get("server_id")
+                        stats = payload.get("stats", {})
+                        self.backend_service.update_heartbeat(server_id, stats)
+                        send_packet(conn, build_packet("HEARTBEAT_ACK", request_id=req_id))
+                        
+                    elif msg_type == "VALIDATE_TOKEN":
+                        token = payload.get("token")
+                        with self.lock:
+                            if token in self.active_sessions:
+                                session = self.active_sessions[token]
+                                send_packet(conn, build_packet("TOKEN_VALID", {
+                                    "user_id": session["user_id"],
+                                    "username": session["username"]
+                                }, request_id=req_id))
+                            else:
+                                send_packet(conn, build_packet("TOKEN_INVALID", request_id=req_id))
+                    
+                    elif msg_type == "USER_ROOM_STATUS_UPDATE":
+                        # Used by Process Server to notify user joined/left a room
+                        user_id = payload.get("user_id")
+                        username = payload.get("username")
+                        status = payload.get("status") # 'in_room' or 'waiting'
+                        server_id = payload.get("server_id")
+                        active_room = payload.get("room_name")
+                        self.presence_service.update_presence(user_id, username, status, server_id, active_room)
+                        send_packet(conn, build_packet("SYSTEM_EVENT_ACK", request_id=req_id))
+
+        except (ConnectionError, socket.error):
+            if current_server_id:
+                self.logger.warning(f"Backend {current_server_id} disconnected unexpectedly.")
+        except Exception as e:
+            self.logger.exception(f"Error handling backend {addr}: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NetCourier Gateway")

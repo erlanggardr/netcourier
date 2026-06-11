@@ -79,8 +79,14 @@ class WaitingView(ttk.Frame):
     def on_refresh(self):
         self.app.logger.info("Refreshing user and room lists")
         self.app.gateway_conn.send_request("LIST_ONLINE_USERS", callback=self._on_online_users_response)
-        # LIST_ROOMS is Phase 4, but we can send it or just ignore it for now
-        # self.app.gateway_conn.send_request("LIST_ROOMS", callback=self._on_list_rooms_response)
+        self.app.gateway_conn.send_request("LIST_ROOMS", callback=self._on_list_rooms_response)
+
+    def _on_list_rooms_response(self, header):
+        if header["type"] == "ROOM_LIST_RESPONSE":
+            rooms = header["payload"].get("rooms", [])
+            self.room_list.update_rooms(rooms)
+        elif header["type"] == "ERROR":
+            messagebox.showerror("Error", f"Failed to get room list: {header['payload'].get('message')}")
 
     def _on_online_users_response(self, header):
         if header["type"] == "ONLINE_USERS_RESPONSE":
@@ -133,8 +139,17 @@ class WaitingView(ttk.Frame):
             return
         
         self.app.logger.info(f"Joining room: {room_name}")
-        # Real app: send JOIN_ROOM to Gateway, get server location, then switch view
-        self.app.show_room_chat()
+        self.app.gateway_conn.send_request("JOIN_ROOM", {
+            "room_name": room_name
+        }, callback=self._on_room_location_response)
+
+    def _on_room_location_response(self, header):
+        if header["type"] == "ROOM_LOCATION":
+            data = header["payload"]
+            self.app.logger.info(f"Room location received: {data['host']}:{data['port']}")
+            self.app.show_room_chat(data["room_name"])
+        elif header["type"] == "ERROR":
+            messagebox.showerror("Join Error", header["payload"].get("message", "Could not join room"))
 
     def on_create_room(self):
         room_name = self.room_name_entry.get()
@@ -143,10 +158,20 @@ class WaitingView(ttk.Frame):
             return
         
         self.app.logger.info(f"Creating room: {room_name}")
-        # Real app: send CREATE_ROOM to Gateway
-        messagebox.showinfo("Success", f"Room '{room_name}' created!")
-        self.room_name_entry.delete(0, tk.END)
-        self.on_refresh()
+        self.app.gateway_conn.send_request("CREATE_ROOM", {
+            "room_name": room_name,
+            "description": ""
+        }, callback=self._on_room_assigned_response)
+
+    def _on_room_assigned_response(self, header):
+        if header["type"] == "ROOM_ASSIGNED":
+            data = header["payload"]
+            messagebox.showinfo("Success", f"Room '{data['room_name']}' created on {data['server_id']}!")
+            self.room_name_entry.delete(0, tk.END)
+            self.on_refresh()
+            self.app.show_room_chat(data["room_name"])
+        elif header["type"] == "ERROR":
+            messagebox.showerror("Create Room Error", header["payload"].get("message", "Could not create room"))
 
     def on_send_pm(self):
         recipient = self.user_list.get_selected_user()
