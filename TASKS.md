@@ -58,15 +58,15 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 3 - PM and Presence
 
-- [ ] Implement `user_presence`.
-- [ ] Implement online users request and Tkinter table update.
-- [ ] Implement `PRIVATE_MESSAGE_SEND`.
-- [ ] Implement PM delivery ke online user.
-- [ ] Implement PM stored_offline.
-- [ ] Implement `PM_HISTORY_REQUEST`.
-- [ ] Test PM waiting-to-waiting.
-- [ ] Test PM waiting-to-in-room.
-- [ ] Test PM offline recipient.
+- [x] Implement `user_presence`.
+- [x] Implement online users request and Tkinter table update.
+- [x] Implement `PRIVATE_MESSAGE_SEND`.
+- [x] Implement PM delivery ke online user.
+- [x] Implement PM stored_offline.
+- [x] Implement `PM_HISTORY_REQUEST`.
+- [x] Test PM waiting-to-waiting.
+- [x] Test PM waiting-to-in-room.
+- [x] Test PM offline recipient.
 
 ---
 

@@ -16,6 +16,8 @@ from common.protocol import receive_packet, send_packet, build_packet, build_err
 from common.db import initialize_db
 from common.logging_config import setup_logging
 from gateway.auth_service import AuthService
+from gateway.presence_service import PresenceService
+from gateway.pm_service import PMService
 
 class Gateway:
     def __init__(self, host, client_port, backend_port):
@@ -25,6 +27,8 @@ class Gateway:
         
         self.logger = setup_logging("gateway")
         self.auth_service = AuthService()
+        self.presence_service = PresenceService()
+        self.pm_service = PMService()
         
         # session_token -> {user_id, username, socket, last_seen}
         self.active_sessions = {}
@@ -112,8 +116,17 @@ class Gateway:
                             send_packet(conn, build_error_packet("INVALID_TOKEN", request_id=req_id))
                             continue
                         
-                        # Forward to specialized handlers in Phase 3+
-                        self.logger.warning(f"Unhandled message type: {msg_type}")
+                        user_id = self.active_sessions[token]["user_id"]
+                        username = self.active_sessions[token]["username"]
+                        
+                        if msg_type == "LIST_ONLINE_USERS":
+                            self._handle_list_online_users(conn, req_id)
+                        elif msg_type == "PRIVATE_MESSAGE_SEND":
+                            self._handle_private_message_send(conn, req_id, json_payload, user_id, username)
+                        elif msg_type == "PM_HISTORY_REQUEST":
+                            self._handle_pm_history_request(conn, req_id, json_payload, user_id)
+                        else:
+                            self.logger.warning(f"Unhandled message type: {msg_type}")
                         
         except (ConnectionError, socket.error):
             self.logger.info(f"Client {addr} disconnected")
@@ -156,6 +169,7 @@ class Gateway:
                     "last_seen": datetime.now()
                 }
                 self.user_to_token[username] = token
+                self.presence_service.update_presence(user["user_id"], username, "online", active_room="waiting")
             
             send_packet(conn, build_packet("LOGIN_OK", {
                 "user_id": user["user_id"],
@@ -177,11 +191,77 @@ class Gateway:
     def _cleanup_session(self, token):
         with self.lock:
             if token in self.active_sessions:
-                username = self.active_sessions[token]["username"]
+                session_info = self.active_sessions[token]
+                username = session_info["username"]
+                user_id = session_info["user_id"]
                 del self.active_sessions[token]
                 if self.user_to_token.get(username) == token:
                     del self.user_to_token[username]
+                self.presence_service.update_presence(user_id, username, "offline")
                 self.logger.info(f"Session cleaned up for user: {username}")
+
+    def _handle_list_online_users(self, conn, req_id):
+        users = self.presence_service.get_online_users()
+        send_packet(conn, build_packet("ONLINE_USERS_RESPONSE", {"users": users}, request_id=req_id))
+
+    def _handle_private_message_send(self, conn, req_id, payload, sender_id, sender_username):
+        recipient_username = payload.get("recipient_username")
+        content = payload.get("content")
+        
+        recipient_id = self.pm_service.get_user_id_by_username(recipient_username)
+        if not recipient_id:
+            send_packet(conn, build_error_packet("USER_NOT_FOUND", request_id=req_id))
+            return
+
+        # Check if recipient is online
+        recipient_token = self.user_to_token.get(recipient_username)
+        if recipient_token and recipient_token in self.active_sessions:
+            # Recipient is online
+            status = "delivered"
+            self.pm_service.store_pm(sender_id, sender_username, recipient_id, recipient_username, content, status)
+            
+            # Send PM_STATUS to sender
+            send_packet(conn, build_packet("PRIVATE_MESSAGE_STATUS", {
+                "recipient_username": recipient_username,
+                "status": "delivered"
+            }, request_id=req_id))
+            
+            # Send PM_RECEIVED to recipient
+            recipient_conn = self.active_sessions[recipient_token]["socket"]
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                send_packet(recipient_conn, build_packet("PRIVATE_MESSAGE_RECEIVED", {
+                    "sender_username": sender_username,
+                    "content": content,
+                    "timestamp": now_str
+                }))
+            except Exception as e:
+                self.logger.error(f"Failed to deliver PM to {recipient_username}: {e}")
+                # Fallback to stored_offline if delivery fails?
+        else:
+            # Recipient is offline
+            status = "stored_offline"
+            self.pm_service.store_pm(sender_id, sender_username, recipient_id, recipient_username, content, status)
+            
+            # Send PM_STATUS to sender
+            send_packet(conn, build_packet("PRIVATE_MESSAGE_STATUS", {
+                "recipient_username": recipient_username,
+                "status": "stored_offline"
+            }, request_id=req_id))
+
+    def _handle_pm_history_request(self, conn, req_id, payload, user_id):
+        other_username = payload.get("other_username")
+        other_user_id = self.pm_service.get_user_id_by_username(other_username)
+        
+        if not other_user_id:
+            send_packet(conn, build_error_packet("USER_NOT_FOUND", request_id=req_id))
+            return
+            
+        history = self.pm_service.get_pm_history(user_id, other_user_id)
+        send_packet(conn, build_packet("PM_HISTORY_RESPONSE", {
+            "other_username": other_username,
+            "messages": history
+        }, request_id=req_id))
 
     def _handle_backend(self, conn, addr):
         self.logger.info(f"New backend connection from {addr}")

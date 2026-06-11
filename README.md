@@ -111,7 +111,7 @@ Central Database + Local File Storage
 ```txt
 netcourier/
 ├── gateway/
-│   ├── gateway.py
+│   ├── main.py
 │   ├── auth_service.py
 │   ├── pm_service.py
 │   ├── room_directory.py
@@ -186,7 +186,7 @@ netcourier/
 ### Terminal 1: Gateway
 
 ```bash
-python gateway/gateway.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
+python gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
 ```
 
 ### Terminal 2: Process Server S1

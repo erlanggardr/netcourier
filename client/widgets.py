@@ -65,6 +65,11 @@ class UserList(ttk.Frame):
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+    def bind_select(self, callback):
+        def on_select(event):
+            callback()
+        self.tree.bind("<<TreeviewSelect>>", on_select)
+
     def update_users(self, users):
         self.tree.delete(*self.tree.get_children())
         for user in users:

@@ -29,6 +29,7 @@ class WaitingView(ttk.Frame):
         # Left sidebar - Online Users
         self.user_list = UserList(self.main_paned)
         self.main_paned.add(self.user_list, weight=1)
+        self.user_list.bind_select(self.on_user_selected)
         
         # Center - Room List and Private Chat
         self.center_frame = ttk.Frame(self.main_paned)
@@ -72,13 +73,58 @@ class WaitingView(ttk.Frame):
         self.status_bar.set_user(self.app.current_user)
         self.status_bar.set_status("Connected to Gateway")
 
-        # Initial data simulation
-        self.simulate_data()
+        # Initial data fetch
+        self.on_refresh()
 
     def on_refresh(self):
         self.app.logger.info("Refreshing user and room lists")
-        # In real app, send LIST_ONLINE_USERS and LIST_ROOMS requests
-        self.simulate_data()
+        self.app.gateway_conn.send_request("LIST_ONLINE_USERS", callback=self._on_online_users_response)
+        # LIST_ROOMS is Phase 4, but we can send it or just ignore it for now
+        # self.app.gateway_conn.send_request("LIST_ROOMS", callback=self._on_list_rooms_response)
+
+    def _on_online_users_response(self, header):
+        if header["type"] == "ONLINE_USERS_RESPONSE":
+            users = header["payload"].get("users", [])
+            # users is a list of dicts with 'username' and 'status'
+            user_names = [u["username"] for u in users]
+            self.user_list.update_users(user_names)
+        elif header["type"] == "ERROR":
+            messagebox.showerror("Error", f"Failed to get online users: {header['payload'].get('message')}")
+
+    def on_user_selected(self):
+        selected_user = self.user_list.get_selected_user()
+        if selected_user:
+            self.app.logger.info(f"Selected user: {selected_user}, requesting PM history")
+            self.pm_display.text_area.config(state=tk.NORMAL)
+            self.pm_display.text_area.delete(1.0, tk.END)
+            self.pm_display.text_area.config(state=tk.DISABLED)
+            
+            self.app.gateway_conn.send_request("PM_HISTORY_REQUEST", {
+                "other_username": selected_user
+            }, callback=self._on_pm_history_response)
+
+    def _on_pm_history_response(self, header):
+        if header["type"] == "PM_HISTORY_RESPONSE":
+            messages = header["payload"].get("messages", [])
+            other_username = header["payload"].get("other_username")
+            
+            # Check if this user is still selected
+            if self.user_list.get_selected_user() != other_username:
+                return
+                
+            self.pm_display.text_area.config(state=tk.NORMAL)
+            self.pm_display.text_area.delete(1.0, tk.END)
+            self.pm_display.text_area.config(state=tk.DISABLED)
+            
+            for msg in messages:
+                sender = msg["sender_username"]
+                content = msg["content"]
+                timestamp = msg["created_at"].split(" ")[1] if " " in msg["created_at"] else msg["created_at"]
+                
+                align = "self" if sender == self.app.current_user else "other"
+                self.pm_display.add_message(sender, content, timestamp, align)
+        elif header["type"] == "ERROR":
+            messagebox.showerror("Error", f"Failed to get PM history: {header['payload'].get('message')}")
 
     def on_join_room(self):
         room_name = self.room_list.get_selected_room()
@@ -112,16 +158,37 @@ class WaitingView(ttk.Frame):
             return
         
         self.app.logger.info(f"Sending PM to {recipient}: {message}")
-        # Real app: send PRIVATE_MESSAGE_SEND to Gateway
+        
+        # Display our own message locally first
         import datetime
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self.pm_display.add_message(self.app.current_user, message, ts, "self")
         self.pm_entry.delete(0, tk.END)
+        
+        # Send to Gateway
+        self.app.gateway_conn.send_request("PRIVATE_MESSAGE_SEND", {
+            "recipient_username": recipient,
+            "content": message
+        }, callback=self._on_pm_status)
 
-    def simulate_data(self):
-        self.user_list.update_users(["user1", "user2", "admin", "guest"])
-        self.room_list.update_rooms([
-            {"name": "General", "members": 5},
-            {"name": "Python", "members": 12},
-            {"name": "Networking", "members": 3}
-        ])
+    def _on_pm_status(self, header):
+        if header["type"] == "PRIVATE_MESSAGE_STATUS":
+            status = header["payload"].get("status")
+            recipient = header["payload"].get("recipient_username")
+            # We already displayed it, maybe update status?
+            pass
+        elif header["type"] == "ERROR":
+            messagebox.showerror("PM Error", header["payload"].get("message", "Unknown error"))
+
+    def on_pm_received(self, payload):
+        sender = payload.get("sender_username")
+        content = payload.get("content")
+        timestamp = payload.get("timestamp")
+        if not timestamp:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        else:
+            # Parse timestamp if needed, but just using it is fine
+            timestamp = timestamp.split(" ")[1] if " " in timestamp else timestamp
+            
+        self.pm_display.add_message(sender, content, timestamp, "other")

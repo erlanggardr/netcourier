@@ -39,7 +39,7 @@ Minimal proses yang berjalan saat demo:
 
 ```txt
 Terminal 1:
-python gateway/gateway.py --client-port 9000 --backend-port 9001
+python gateway/main.py --client-port 9000 --backend-port 9001
 
 Terminal 2:
 python server/server.py --server-id S1 --port 9101 --gateway-port 9001

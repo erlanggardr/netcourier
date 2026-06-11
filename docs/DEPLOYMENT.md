@@ -62,7 +62,7 @@ Cocok untuk:
 Terminal 1:
 
 ```bash
-python gateway/gateway.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
+python gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
 ```
 
 Terminal 2:
@@ -134,7 +134,7 @@ Jalankan dengan tmux:
 
 ```bash
 tmux new -s gateway
-python3 gateway/gateway.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
+python3 gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
 ```
 
 ```bash
