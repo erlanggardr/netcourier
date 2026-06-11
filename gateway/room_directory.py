@@ -14,7 +14,7 @@ class RoomDirectoryService:
                 cursor = conn.cursor()
                 # Get rooms and their member counts
                 cursor.execute("""
-                    SELECT r.room_name, r.description, COUNT(rm.member_id) as members
+                    SELECT r.room_name as name, r.description, COUNT(rm.member_id) as members
                     FROM rooms r
                     LEFT JOIN room_members rm ON r.room_id = rm.room_id AND rm.is_active = 1
                     WHERE r.is_active = 1
@@ -43,8 +43,8 @@ class RoomDirectoryService:
                 # Create room
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute("""
-                    INSERT INTO rooms (room_name, description, created_by, server_id, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO rooms (room_name, description, created_by, server_id, created_at, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
                 """, (room_name, description, creator_id, server_id, now))
                 room_id = cursor.lastrowid
 

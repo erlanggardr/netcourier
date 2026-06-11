@@ -87,14 +87,14 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 5 - Process Server Basic
 
-- [ ] Buat Process Server TCP server.
-- [ ] Implement backend register ke Gateway.
-- [ ] Implement heartbeat ke Gateway.
-- [ ] Implement `AUTH_BACKEND`.
-- [ ] Implement token validation ke Gateway.
-- [ ] Implement join room backend.
-- [ ] Implement leave room.
-- [ ] Update user presence saat join/leave room.
+- [x] Buat Process Server TCP server.
+- [x] Implement backend register ke Gateway.
+- [x] Implement heartbeat ke Gateway.
+- [x] Implement `AUTH_BACKEND`.
+- [x] Implement token validation ke Gateway.
+- [x] Implement join room backend.
+- [x] Implement leave room.
+- [x] Update user presence saat join/leave room.
 
 ---
 

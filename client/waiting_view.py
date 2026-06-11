@@ -73,13 +73,20 @@ class WaitingView(ttk.Frame):
         self.status_bar.set_user(self.app.current_user)
         self.status_bar.set_status("Connected to Gateway")
 
-        # Initial data fetch
+        # Initial data fetch and start auto-refresh
         self.on_refresh()
+        self._auto_refresh()
 
     def on_refresh(self):
         self.app.logger.info("Refreshing user and room lists")
         self.app.gateway_conn.send_request("LIST_ONLINE_USERS", callback=self._on_online_users_response)
         self.app.gateway_conn.send_request("LIST_ROOMS", callback=self._on_list_rooms_response)
+
+    def _auto_refresh(self):
+        """Periodically refresh the lists if this view is active."""
+        if self.winfo_exists():
+            self.on_refresh()
+            self.after(10000, self._auto_refresh) # Every 10 seconds
 
     def _on_list_rooms_response(self, header):
         if header["type"] == "ROOM_LIST_RESPONSE":
@@ -147,7 +154,7 @@ class WaitingView(ttk.Frame):
         if header["type"] == "ROOM_LOCATION":
             data = header["payload"]
             self.app.logger.info(f"Room location received: {data['host']}:{data['port']}")
-            self.app.show_room_chat(data["room_name"])
+            self.app.show_room_chat(data["room_name"], host=data["host"], port=data["port"])
         elif header["type"] == "ERROR":
             messagebox.showerror("Join Error", header["payload"].get("message", "Could not join room"))
 
@@ -169,7 +176,7 @@ class WaitingView(ttk.Frame):
             messagebox.showinfo("Success", f"Room '{data['room_name']}' created on {data['server_id']}!")
             self.room_name_entry.delete(0, tk.END)
             self.on_refresh()
-            self.app.show_room_chat(data["room_name"])
+            self.app.show_room_chat(data["room_name"], host=data["host"], port=data["port"])
         elif header["type"] == "ERROR":
             messagebox.showerror("Create Room Error", header["payload"].get("message", "Could not create room"))
 
@@ -186,7 +193,7 @@ class WaitingView(ttk.Frame):
         
         # Display our own message locally first
         import datetime
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        ts = datetime.now().strftime("%H:%M:%S")
         self.pm_display.add_message(self.app.current_user, message, ts, "self")
         self.pm_entry.delete(0, tk.END)
         

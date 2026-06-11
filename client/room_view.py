@@ -82,13 +82,39 @@ class RoomView(ttk.Frame):
         message = self.message_entry.get()
         if not message:
             return
-        
+
         self.app.logger.info(f"Sending message: {message}")
-        # Real app: send ROOM_CHAT_SEND to Process Server
+        if self.app.room_conn:
+            self.app.room_conn.send_request("ROOM_CHAT_SEND", {
+                "room_name": self.room_name,
+                "message": message
+            })
+            self.message_entry.delete(0, tk.END)
+
+    def on_room_message(self, payload):
+        sender = payload.get("sender_username")
+        content = payload.get("message")
+        timestamp = payload.get("timestamp")
+        if not timestamp:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        else:
+            timestamp = timestamp.split(" ")[1] if " " in timestamp else timestamp
+
+        align = "self" if sender == self.app.current_user else "other"
+        self.message_list.add_message(sender, content, timestamp, align)
+
+    def on_room_system_event(self, payload):
+        event_type = payload.get("event_type")
+        message = payload.get("message")
         import datetime
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self.message_list.add_message(self.app.current_user, message, ts, "self")
-        self.message_entry.delete(0, tk.END)
+        self.message_list.add_message(None, message, ts, "system")
+
+        # If member list changed, update it
+        if "members" in payload:
+            self.user_list.update_users(payload["members"])
+
 
     def on_upload(self):
         file_path = filedialog.askopenfilename()
@@ -114,8 +140,7 @@ class RoomView(ttk.Frame):
 
     def on_leave(self):
         self.app.logger.info(f"Leaving room: {self.room_name}")
-        # Real app: send LEAVE_ROOM, disconnect from Process Server
-        self.app.show_waiting_room()
+        self.app.leave_room_backend()
 
     def simulate_data(self):
         self.user_list.update_users(["user1", "user2", "admin"])

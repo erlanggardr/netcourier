@@ -8,6 +8,7 @@ from client.auth_view import AuthView
 from client.waiting_view import WaitingView
 from client.room_view import RoomView
 from client.gateway_connection import GatewayConnection
+from client.room_connection import RoomConnection
 
 class NetCourierApp:
     def __init__(self, gateway_host, gateway_port):
@@ -29,6 +30,7 @@ class NetCourierApp:
         
         # Networking
         self.gateway_conn = GatewayConnection(gateway_host, gateway_port, self)
+        self.room_conn = None
         
         # Setup styles
         self._setup_styles()
@@ -81,11 +83,68 @@ class NetCourierApp:
         self.current_view = WaitingView(self.container, self)
         self.current_view.pack(fill=tk.BOTH, expand=True)
 
-    def show_room_chat(self, room_name="General"):
-        self.logger.info(f"Switching to Room Chat view: {room_name}")
-        self._clear_container()
-        self.current_view = RoomView(self.container, self, room_name=room_name)
-        self.current_view.pack(fill=tk.BOTH, expand=True)
+    def show_room_chat(self, room_name="General", host=None, port=None):
+        """Transition to a room. If host/port provided, connect to backend first."""
+        if host and port:
+            self.join_room_backend(host, port, room_name)
+        else:
+            self.logger.info(f"Switching to Room Chat view: {room_name}")
+            self._clear_container()
+            self.current_view = RoomView(self.container, self, room_name=room_name)
+            self.current_view.pack(fill=tk.BOTH, expand=True)
+
+    def join_room_backend(self, host, port, room_name):
+        self.logger.info(f"Connecting to backend room {room_name} at {host}:{port}")
+        
+        if self.room_conn:
+            self.room_conn.disconnect()
+            
+        self.room_conn = RoomConnection(host, port, self)
+        if self.room_conn.connect():
+            # 1. Auth with backend
+            self.room_conn.send_request("AUTH_BACKEND", callback=lambda h: self._on_auth_backend_response(h, room_name))
+        else:
+            messagebox.showerror("Error", f"Could not connect to room server at {host}:{port}")
+
+    def _on_auth_backend_response(self, header, room_name):
+        if header["type"] == "AUTH_BACKEND_OK":
+            # 2. Join room
+            self.room_conn.send_request("JOIN_ROOM_BACKEND", {"room_name": room_name}, 
+                                        callback=self._on_join_room_backend_response)
+        else:
+            messagebox.showerror("Auth Error", "Failed to authenticate with room server")
+
+    def _on_join_room_backend_response(self, header):
+        if header["type"] == "JOIN_ROOM_OK":
+            room_name = header["payload"]["room_name"]
+            self.room_conn.current_room = room_name
+            self.show_room_chat(room_name)
+        else:
+            messagebox.showerror("Join Error", "Failed to join room on server")
+
+    def leave_room_backend(self):
+        if self.room_conn:
+            self.room_conn.send_request("LEAVE_ROOM", callback=self._on_leave_room_response)
+
+    def _on_leave_room_response(self, header):
+        if self.room_conn:
+            self.room_conn.disconnect()
+            self.room_conn = None
+        self.show_waiting_room()
+
+    def on_room_disconnected(self):
+        if self.room_conn:
+            messagebox.showwarning("Room Connection Lost", "Disconnected from room server.")
+            self.room_conn = None
+            self.show_waiting_room()
+
+    def on_room_message(self, payload):
+        if isinstance(self.current_view, RoomView):
+            self.current_view.on_room_message(payload)
+
+    def on_room_system_event(self, payload):
+        if isinstance(self.current_view, RoomView):
+            self.current_view.on_room_system_event(payload)
 
     def _clear_container(self):
         for widget in self.container.winfo_children():
