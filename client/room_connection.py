@@ -84,6 +84,12 @@ class RoomConnection:
             return
 
         # Room events (Phase 6+)
+        if msg_type == "DOWNLOAD_CHUNK":
+            if hasattr(self.app, "active_downloader") and self.app.active_downloader:
+                chunk_index = payload.get("chunk_index")
+                self.app.active_downloader.handle_chunk(chunk_index, payload_bytes)
+            return
+
         if msg_type == "ROOM_CHAT_BROADCAST":
             self.app.run_in_ui(self.app.on_room_message, payload)
         elif msg_type == "SYSTEM_EVENT":

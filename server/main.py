@@ -158,6 +158,16 @@ class ProcessServer:
                             self._handle_room_chat_send(conn, req_id, payload)
                         elif msg_type == "ROOM_HISTORY_REQUEST":
                             self._handle_room_history_request(conn, req_id, payload)
+                        elif msg_type == "FILE_LIST_REQUEST":
+                            self._handle_file_list_request(conn, req_id, payload)
+                        elif msg_type == "UPLOAD_INIT":
+                            self._handle_upload_init(conn, req_id, payload)
+                        elif msg_type == "UPLOAD_CHUNK":
+                            self._handle_upload_chunk(conn, req_id, payload, binary_payload)
+                        elif msg_type == "UPLOAD_FINISH":
+                            self._handle_upload_finish(conn, req_id, payload)
+                        elif msg_type == "DOWNLOAD_REQUEST":
+                            self._handle_download_request(conn, req_id, payload)
                         else:
                             self.logger.warning(f"Unhandled message type: {msg_type}")
         except (ConnectionError, socket.error):
@@ -412,6 +422,238 @@ class ProcessServer:
                 # No need to wait for response for fire-and-forget notification
         except Exception as e:
             self.logger.error(f"Failed to update presence to Gateway: {e}")
+
+    def _handle_file_list_request(self, conn, req_id, payload):
+        room_name = payload.get("room_name")
+        if not room_name:
+            send_packet(conn, build_error_packet("MISSING_FIELD", request_id=req_id))
+            return
+            
+        room_id = self._get_room_id(room_name)
+        if not room_id:
+            send_packet(conn, build_error_packet("ROOM_NOT_FOUND", request_id=req_id))
+            return
+            
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("""
+                    SELECT f.file_id, f.original_filename, f.size_bytes, u.username as uploader_username
+                    FROM files f
+                    JOIN users u ON f.uploader_id = u.user_id
+                    WHERE f.room_id = ? AND f.status = 'available'
+                """, (room_id,))
+                
+                files = [dict(row) for row in cursor.fetchall()]
+                
+                response = build_packet("FILE_LIST_RESPONSE", {
+                    "room_name": room_name,
+                    "files": files
+                }, request_id=req_id)
+                send_packet(conn, response)
+        except Exception as e:
+            self.logger.error(f"Failed to fetch file list: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _handle_upload_init(self, conn, req_id, payload):
+        room_id = payload.get("room_id")
+        room_name = payload.get("room_name")
+        filename = payload.get("filename")
+        filesize = payload.get("filesize")
+        chunk_size = payload.get("chunk_size")
+        total_chunks = payload.get("total_chunks")
+        checksum = payload.get("checksum_sha256")
+        
+        user_info = self.clients[conn]
+        
+        if not room_id and room_name:
+            room_id = self._get_room_id(room_name)
+            
+        if not all([room_id, filename, filesize, chunk_size, total_chunks, checksum]):
+            send_packet(conn, build_error_packet("MISSING_FIELD", request_id=req_id))
+            return
+            
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                from datetime import datetime
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                import os
+                import hashlib
+                from common.constants import PROJECT_ROOT
+                storage_dir = os.path.join(PROJECT_ROOT, "storage", self.server_id, str(room_id))
+                os.makedirs(storage_dir, exist_ok=True)
+                stored_filename = f"{int(datetime.now().timestamp())}_{filename}"
+                stored_path = os.path.join(storage_dir, stored_filename)
+                
+                cursor.execute("""
+                    INSERT INTO files (room_id, server_id, uploader_id, original_filename, stored_filename, stored_path, size_bytes, checksum_sha256, chunk_size, total_chunks, status, uploaded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploading', ?)
+                """, (room_id, self.server_id, user_info["user_id"], filename, stored_filename, stored_path, filesize, checksum, chunk_size, total_chunks, now))
+                file_id = cursor.lastrowid
+                
+                cursor.execute("""
+                    INSERT INTO file_transfers (file_id, room_id, server_id, user_id, direction, status, total_chunks, started_at, last_activity_at)
+                    VALUES (?, ?, ?, ?, 'upload', 'in_progress', ?, ?, ?)
+                """, (file_id, room_id, self.server_id, user_info["user_id"], total_chunks, now, now))
+                transfer_id = cursor.lastrowid
+                db_conn.commit()
+                
+                send_packet(conn, build_packet("UPLOAD_READY", {
+                    "transfer_id": transfer_id,
+                    "start_chunk": 0
+                }, request_id=req_id))
+        except Exception as e:
+            self.logger.error(f"Upload init failed: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _handle_upload_chunk(self, conn, req_id, payload, binary_payload):
+        transfer_id = payload.get("transfer_id")
+        chunk_index = payload.get("chunk_index")
+        
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("""
+                    SELECT f.stored_path, f.chunk_size, ft.status
+                    FROM file_transfers ft
+                    JOIN files f ON ft.file_id = f.file_id
+                    WHERE ft.transfer_id = ?
+                """, (transfer_id,))
+                row = cursor.fetchone()
+                if not row or row["status"] != "in_progress":
+                    send_packet(conn, build_error_packet("INVALID_PACKET", request_id=req_id))
+                    return
+                    
+                stored_path = row["stored_path"]
+                chunk_size = row["chunk_size"]
+                
+                with open(stored_path, "ab" if chunk_index > 0 else "wb") as f:
+                    f.write(binary_payload)
+                    
+                cursor.execute("""
+                    INSERT INTO transfer_chunks (transfer_id, chunk_index, size_bytes, status)
+                    VALUES (?, ?, ?, 'received')
+                """, (transfer_id, chunk_index, len(binary_payload)))
+                
+                cursor.execute("""
+                    UPDATE file_transfers SET completed_chunks = completed_chunks + 1, bytes_transferred = bytes_transferred + ? WHERE transfer_id = ?
+                """, (len(binary_payload), transfer_id))
+                db_conn.commit()
+                
+                send_packet(conn, build_packet("CHUNK_ACK", {
+                    "transfer_id": transfer_id,
+                    "chunk_index": chunk_index,
+                    "status": "received"
+                }, request_id=req_id))
+        except Exception as e:
+            self.logger.error(f"Upload chunk failed: {e}")
+
+    def _handle_upload_finish(self, conn, req_id, payload):
+        transfer_id = payload.get("transfer_id")
+        
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("""
+                    SELECT f.file_id, f.stored_path, f.checksum_sha256, f.original_filename, f.room_id
+                    FROM file_transfers ft
+                    JOIN files f ON ft.file_id = f.file_id
+                    WHERE ft.transfer_id = ?
+                """, (transfer_id,))
+                row = cursor.fetchone()
+                
+                if row:
+                    import hashlib
+                    sha256 = hashlib.sha256()
+                    with open(row["stored_path"], "rb") as f:
+                        for chunk in iter(lambda: f.read(65536), b""):
+                            sha256.update(chunk)
+                    calc_checksum = sha256.hexdigest()
+                    
+                    if calc_checksum == row["checksum_sha256"]:
+                        cursor.execute("UPDATE files SET status = 'available' WHERE file_id = ?", (row["file_id"],))
+                        cursor.execute("UPDATE file_transfers SET status = 'completed' WHERE transfer_id = ?", (transfer_id,))
+                        db_conn.commit()
+                        
+                        send_packet(conn, build_packet("UPLOAD_SUCCESS", {
+                            "transfer_id": transfer_id
+                        }, request_id=req_id))
+                        
+                        # Broadcast system event
+                        user_info = self.clients[conn]
+                        cursor.execute("SELECT room_name FROM rooms WHERE room_id = ?", (row["room_id"],))
+                        room_row = cursor.fetchone()
+                        if room_row:
+                            self._broadcast_system_event(room_row["room_name"], f"User {user_info['username']} uploaded {row['original_filename']}")
+                    else:
+                        send_packet(conn, build_error_packet("CHECKSUM_FAILED", request_id=req_id))
+        except Exception as e:
+            self.logger.error(f"Upload finish failed: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _handle_download_request(self, conn, req_id, payload):
+        file_id = payload.get("file_id")
+        user_info = self.clients[conn]
+        
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("SELECT * FROM files WHERE file_id = ?", (file_id,))
+                file_row = cursor.fetchone()
+                
+                if not file_row or file_row["status"] != "available":
+                    send_packet(conn, build_error_packet("FILE_NOT_FOUND", request_id=req_id))
+                    return
+                
+                from datetime import datetime
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("""
+                    INSERT INTO file_transfers (file_id, room_id, server_id, user_id, direction, status, total_chunks, started_at, last_activity_at)
+                    VALUES (?, ?, ?, ?, 'download', 'in_progress', ?, ?, ?)
+                """, (file_id, file_row["room_id"], self.server_id, user_info["user_id"], file_row["total_chunks"], now, now))
+                transfer_id = cursor.lastrowid
+                db_conn.commit()
+                
+                send_packet(conn, build_packet("DOWNLOAD_READY", {
+                    "transfer_id": transfer_id,
+                    "total_chunks": file_row["total_chunks"],
+                    "chunk_size": file_row["chunk_size"],
+                    "checksum_sha256": file_row["checksum_sha256"]
+                }, request_id=req_id))
+                
+                # Start pushing chunks in a thread to avoid blocking client loop
+                import threading
+                threading.Thread(target=self._push_download_chunks, args=(conn, transfer_id, file_row), daemon=True).start()
+        except Exception as e:
+            self.logger.error(f"Download request failed: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _push_download_chunks(self, conn, transfer_id, file_row):
+        stored_path = file_row["stored_path"]
+        chunk_size = file_row["chunk_size"]
+        total_chunks = file_row["total_chunks"]
+        
+        try:
+            with open(stored_path, "rb") as f:
+                for i in range(total_chunks):
+                    chunk_data = f.read(chunk_size)
+                    import json
+                    import struct
+                    packet = build_packet("DOWNLOAD_CHUNK", {
+                        "transfer_id": transfer_id,
+                        "chunk_index": i
+                    })
+                    packet["payload_size"] = len(chunk_data)
+                    header_json = json.dumps(packet).encode('utf-8')
+                    try:
+                        conn.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
+                    except Exception as e:
+                        self.logger.error(f"Error sending download chunk {i}: {e}")
+                        break
+        except Exception as e:
+            self.logger.error(f"Failed to push download chunks: {e}")
 
     def _cleanup_client(self, conn):
         with self.lock:

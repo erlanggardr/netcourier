@@ -17,6 +17,30 @@ class RoomView(ttk.Frame):
                 "room_name": self.room_name,
                 "limit": 50
             })
+        self.request_file_list()
+
+    def request_file_list(self):
+        if self.app.room_conn:
+            self.app.room_conn.send_request("FILE_LIST_REQUEST", {
+                "room_name": self.room_name
+            }, callback=self.on_file_list_response)
+
+    def on_file_list_response(self, header):
+        payload = header.get("payload", {})
+        files = payload.get("files", [])
+        
+        # update format to match FileList expected: {"filename": "...", "size": "...", "owner": "..."}
+        formatted_files = []
+        for f in files:
+            size_mb = f["size_bytes"] / (1024 * 1024)
+            size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{f['size_bytes']/1024:.0f} KB"
+            formatted_files.append({
+                "file_id": f["file_id"],
+                "filename": f["original_filename"],
+                "size": size_str,
+                "owner": f["uploader_username"]
+            })
+        self.app.run_in_ui(self.file_list.update_files, formatted_files)
 
     def setup_ui(self):
         # Top toolbar
@@ -146,9 +170,14 @@ class RoomView(ttk.Frame):
         if file_path:
             self.app.logger.info(f"Uploading file: {file_path}")
             # Real app: start upload thread, update progress bar
-            import os
-            filename = os.path.basename(file_path)
-            self.transfer_progress.update_progress(filename, 50, 100, "1.2 MB/s")
+            from client.uploader import Uploader
+            room_id = self.app.room_conn.current_room_id if hasattr(self.app.room_conn, "current_room_id") else None
+            # Need room_id. Let's pass it via app or fetch it. Wait, the server uses room_id but we only have room_name in view.
+            # Let's use room_name and let server figure out room_id. Actually, API spec says room_id for UPLOAD_INIT, but maybe we can just send room_name and server fetches it. 
+            # Or we can get room_id from joined_room payload. Let's assume we can fetch it, or we just pass None for now and let Uploader fetch it.
+            # I will modify Uploader to use room_name if room_id is None, and server_main.py will handle room_name.
+            uploader = Uploader(self.app, file_path, self.room_name, room_id)
+            uploader.start()
 
     def on_download(self):
         selected_file = self.file_list.get_selected_file()
@@ -156,12 +185,28 @@ class RoomView(ttk.Frame):
             messagebox.showwarning("Warning", "Please select a file to download")
             return
         
-        filename = selected_file[0]
+        # `get_selected_file` returns dict with `filename` and `file_id` if we modified `FileList`
+        file_id = selected_file.get("file_id") if isinstance(selected_file, dict) else getattr(selected_file, "file_id", None)
+        filename = selected_file.get("filename") if isinstance(selected_file, dict) else selected_file[0] if isinstance(selected_file, tuple) else selected_file
+        
+        if not file_id:
+            # Maybe from mock data, try to find file_id
+            for f in getattr(self.file_list, "files_data", []):
+                if f.get("filename") == filename:
+                    file_id = f.get("file_id")
+                    break
+        
+        if not file_id:
+            messagebox.showerror("Error", "Invalid file selection (no ID)")
+            return
+            
         save_path = filedialog.asksaveasfilename(initialfile=filename)
         if save_path:
             self.app.logger.info(f"Downloading file: {filename} to {save_path}")
-            # Real app: start download thread, update progress bar
-            self.transfer_progress.update_progress(filename, 30, 100, "2.5 MB/s")
+            from client.downloader import Downloader
+            downloader = Downloader(self.app, file_id, filename, save_path)
+            self.app.active_downloader = downloader # Keep reference for chunk handling
+            downloader.start()
 
     def on_leave(self):
         self.app.logger.info(f"Leaving room: {self.room_name}")

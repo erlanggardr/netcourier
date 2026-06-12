@@ -112,18 +112,18 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 7 - File Transfer
 
-- [ ] Implement `FILE_LIST_REQUEST`.
-- [ ] Implement `UPLOAD_INIT`.
-- [ ] Implement transfer session.
-- [ ] Implement `UPLOAD_CHUNK`.
-- [ ] Implement `CHUNK_ACK`.
-- [ ] Implement `UPLOAD_FINISH`.
-- [ ] Implement checksum server.
-- [ ] Implement `DOWNLOAD_REQUEST`.
-- [ ] Implement `DOWNLOAD_CHUNK`.
-- [ ] Implement checksum client.
-- [ ] Implement progress upload/download.
-- [ ] Test upload/download 1 MB, 5 MB, 10 MB.
+- [x] Implement `FILE_LIST_REQUEST`.
+- [x] Implement `UPLOAD_INIT`.
+- [x] Implement transfer session.
+- [x] Implement `UPLOAD_CHUNK`.
+- [x] Implement `CHUNK_ACK`.
+- [x] Implement `UPLOAD_FINISH`.
+- [x] Implement checksum server.
+- [x] Implement `DOWNLOAD_REQUEST`.
+- [x] Implement `DOWNLOAD_CHUNK`.
+- [x] Implement checksum client.
+- [x] Implement progress upload/download.
+- [x] Test upload/download 1 MB, 5 MB, 10 MB.
 
 ---
 

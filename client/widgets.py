@@ -114,7 +114,7 @@ class FileList(ttk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         ttk.Label(self, text="Room Files", font=("Arial", 10, "bold")).pack(pady=2)
-        
+
         self.tree = ttk.Treeview(self, columns=("filename", "size", "owner"), show="headings", selectmode="browse")
         self.tree.heading("filename", text="Filename")
         self.tree.heading("size", text="Size")
@@ -122,15 +122,17 @@ class FileList(ttk.Frame):
         self.tree.column("filename", width=200)
         self.tree.column("size", width=80)
         self.tree.column("owner", width=100)
-        
+
         self.scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=self.scrollbar.set)
-        
+
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.files_data = []
 
     def update_files(self, files):
         """files is a list of dicts with 'filename', 'size', 'owner'."""
+        self.files_data = files
         self.tree.delete(*self.tree.get_children())
         for file in files:
             self.tree.insert("", tk.END, values=(file['filename'], file['size'], file['owner']))
