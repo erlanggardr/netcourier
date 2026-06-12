@@ -9,6 +9,14 @@ class RoomView(ttk.Frame):
         self.room_name = room_name
         
         self.setup_ui()
+        self.request_history()
+
+    def request_history(self):
+        if self.app.room_conn:
+            self.app.room_conn.send_request("ROOM_HISTORY_REQUEST", {
+                "room_name": self.room_name,
+                "limit": 50
+            })
 
     def setup_ui(self):
         # Top toolbar
@@ -115,6 +123,23 @@ class RoomView(ttk.Frame):
         if "members" in payload:
             self.user_list.update_users(payload["members"])
 
+    def on_room_history_response(self, payload):
+        messages = payload.get("messages", [])
+        # Clear existing messages just in case
+        self.message_list.clear()
+
+        for msg in messages:
+            sender = msg.get("sender_username")
+            content = msg.get("message")
+            timestamp = msg.get("timestamp")
+            if timestamp and " " in timestamp:
+                timestamp = timestamp.split(" ")[1]
+
+            if msg.get("message_type") == "system":
+                self.message_list.add_message(None, content, timestamp, "system")
+            else:
+                align = "self" if sender == self.app.current_user else "other"
+                self.message_list.add_message(sender, content, timestamp, align)
 
     def on_upload(self):
         file_path = filedialog.askopenfilename()

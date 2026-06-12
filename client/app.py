@@ -145,6 +145,10 @@ class NetCourierApp:
     def on_room_system_event(self, payload):
         if isinstance(self.current_view, RoomView):
             self.current_view.on_room_system_event(payload)
+            
+    def on_room_history_response(self, payload):
+        if isinstance(self.current_view, RoomView):
+            self.current_view.on_room_history_response(payload)
 
     def _clear_container(self):
         for widget in self.container.winfo_children():

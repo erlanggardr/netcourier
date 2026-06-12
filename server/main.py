@@ -154,7 +154,12 @@ class ProcessServer:
                             send_packet(conn, build_error_packet("INVALID_TOKEN", request_id=req_id))
                             continue
                         
-                        self.logger.warning(f"Unhandled message type: {msg_type}")
+                        if msg_type == "ROOM_CHAT_SEND":
+                            self._handle_room_chat_send(conn, req_id, payload)
+                        elif msg_type == "ROOM_HISTORY_REQUEST":
+                            self._handle_room_history_request(conn, req_id, payload)
+                        else:
+                            self.logger.warning(f"Unhandled message type: {msg_type}")
         except (ConnectionError, socket.error):
             self.logger.info(f"Client {addr} disconnected")
         except Exception as e:
@@ -227,7 +232,14 @@ class ProcessServer:
         # Update presence via Gateway
         self._update_presence_gateway(user_info["user_id"], user_info["username"], "in_room", room_name)
         
+        # Add members list to system event
+        members = self._get_room_members(room_name)
+        
+        # Broadcast join message
+        self._broadcast_system_event(room_name, f"User {user_info['username']} joined the room.", members)
+        
         # In Phase 6, we would send history here
+        # Actually client requests history via ROOM_HISTORY_REQUEST after JOIN_ROOM_OK
         send_packet(conn, build_packet("JOIN_ROOM_OK", {"room_name": room_name}, request_id=req_id))
         self.logger.info(f"User {user_info['username']} joined room {room_name}")
 
@@ -244,6 +256,9 @@ class ProcessServer:
             self._update_presence_gateway(user_info["user_id"], user_info["username"], "waiting")
             send_packet(conn, build_packet("LEAVE_ROOM_OK", {"room_name": room_name}, request_id=req_id))
             self.logger.info(f"User {user_info['username']} left room {room_name}")
+            
+            members = self._get_room_members(room_name)
+            self._broadcast_system_event(room_name, f"User {user_info['username']} left the room.", members)
         else:
             send_packet(conn, build_error_packet("NOT_IN_ROOM", request_id=req_id))
 
@@ -255,6 +270,131 @@ class ProcessServer:
             if not self.rooms[room_name]:
                 del self.rooms[room_name]
             user_info["current_room"] = None
+
+    def _get_room_members(self, room_name):
+        with self.lock:
+            if room_name not in self.rooms:
+                return []
+            return [self.clients[c]["username"] for c in self.rooms[room_name]]
+
+    def _broadcast_system_event(self, room_name, message, members=None):
+        if not members:
+            members = self._get_room_members(room_name)
+        packet = build_packet("SYSTEM_EVENT", {
+            "room_name": room_name,
+            "event_type": "room_event",
+            "message": message,
+            "members": members
+        })
+        self._broadcast_to_room(room_name, packet)
+
+    def _broadcast_to_room(self, room_name, packet):
+        with self.lock:
+            if room_name not in self.rooms:
+                return
+            for c in self.rooms[room_name]:
+                try:
+                    send_packet(c, packet)
+                except Exception as e:
+                    self.logger.error(f"Error broadcasting to client in {room_name}: {e}")
+
+    def _get_room_id(self, room_name):
+        with get_db_connection() as db_conn:
+            cursor = db_conn.cursor()
+            cursor.execute("SELECT room_id FROM rooms WHERE room_name = ?", (room_name,))
+            row = cursor.fetchone()
+            if row:
+                return row["room_id"]
+        return None
+
+    def _handle_room_chat_send(self, conn, req_id, payload):
+        room_name = payload.get("room_name")
+        message = payload.get("message")
+        
+        if not room_name or not message:
+            send_packet(conn, build_error_packet("MISSING_FIELD", request_id=req_id))
+            return
+            
+        user_info = self.clients[conn]
+        if user_info["current_room"] != room_name:
+            send_packet(conn, build_error_packet("NOT_IN_ROOM", request_id=req_id))
+            return
+
+        room_id = self._get_room_id(room_name)
+        if not room_id:
+            send_packet(conn, build_error_packet("ROOM_NOT_FOUND", request_id=req_id))
+            return
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Save to DB
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("""
+                    INSERT INTO room_messages (room_id, server_id, sender_id, sender_username, message_type, content, created_at)
+                    VALUES (?, ?, ?, ?, 'text', ?, ?)
+                """, (room_id, self.server_id, user_info["user_id"], user_info["username"], message, now))
+                db_conn.commit()
+        except Exception as e:
+            self.logger.error(f"Failed to save room message: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+            return
+
+        # Broadcast
+        broadcast_packet = build_packet("ROOM_CHAT_BROADCAST", {
+            "room_id": room_id,
+            "room_name": room_name,
+            "sender_username": user_info["username"],
+            "message": message,
+            "timestamp": now
+        }, request_id=req_id)
+        
+        self._broadcast_to_room(room_name, broadcast_packet)
+
+    def _handle_room_history_request(self, conn, req_id, payload):
+        room_name = payload.get("room_name")
+        limit = payload.get("limit", 50)
+        
+        user_info = self.clients[conn]
+        if user_info["current_room"] != room_name:
+            send_packet(conn, build_error_packet("NOT_IN_ROOM", request_id=req_id))
+            return
+
+        room_id = self._get_room_id(room_name)
+        if not room_id:
+            send_packet(conn, build_error_packet("ROOM_NOT_FOUND", request_id=req_id))
+            return
+
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("""
+                    SELECT sender_username, content, created_at, message_type
+                    FROM room_messages
+                    WHERE room_id = ? AND is_deleted = 0
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (room_id, limit))
+                
+                rows = cursor.fetchall()
+                messages = []
+                for row in reversed(rows): # Reverse to chronological
+                    messages.append({
+                        "sender_username": row["sender_username"],
+                        "message": row["content"],
+                        "timestamp": row["created_at"],
+                        "message_type": row["message_type"]
+                    })
+                
+                response = build_packet("ROOM_HISTORY_RESPONSE", {
+                    "room_name": room_name,
+                    "messages": messages
+                }, request_id=req_id)
+                send_packet(conn, response)
+        except Exception as e:
+            self.logger.error(f"Failed to fetch room history: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
 
     def _update_presence_gateway(self, user_id, username, status, room_name=None):
         """Notify Gateway about user presence change."""

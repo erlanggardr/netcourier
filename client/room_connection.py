@@ -88,6 +88,8 @@ class RoomConnection:
             self.app.run_in_ui(self.app.on_room_message, payload)
         elif msg_type == "SYSTEM_EVENT":
             self.app.run_in_ui(self.app.on_room_system_event, payload)
+        elif msg_type == "ROOM_HISTORY_RESPONSE":
+            self.app.run_in_ui(self.app.on_room_history_response, payload)
         elif msg_type == "ERROR":
             error_msg = payload.get("message", "Unknown room error")
             self.app.run_in_ui(self.app.show_error, f"Room Error: {error_msg}")

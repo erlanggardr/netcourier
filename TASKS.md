@@ -100,13 +100,13 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 6 - Room Chat
 
-- [ ] Implement `ROOM_CHAT_SEND`.
-- [ ] Simpan room message ke database.
-- [ ] Broadcast room chat ke semua member.
-- [ ] Implement system message join/leave.
-- [ ] Implement `ROOM_HISTORY_REQUEST`.
-- [ ] Test user di room berbeda tidak menerima pesan.
-- [ ] Test chat history saat join.
+- [x] Implement `ROOM_CHAT_SEND`.
+- [x] Simpan room message ke database.
+- [x] Broadcast room chat ke semua member.
+- [x] Implement system message join/leave.
+- [x] Implement `ROOM_HISTORY_REQUEST`.
+- [x] Test user di room berbeda tidak menerima pesan.
+- [x] Test chat history saat join.
 
 ---
 
