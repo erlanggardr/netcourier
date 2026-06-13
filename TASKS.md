@@ -129,14 +129,14 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 8 - Resume Transfer
 
-- [ ] Simpan transfer state.
-- [ ] Implement interrupted transfer.
-- [ ] Implement `RESUME_TRANSFER`.
-- [ ] Resume download dari chunk terakhir.
-- [ ] Resume upload dari chunk terakhir.
-- [ ] Test disconnect saat download.
-- [ ] Test disconnect saat upload.
-- [ ] Validasi checksum setelah resume.
+- [x] Simpan transfer state.
+- [x] Implement interrupted transfer.
+- [x] Implement `RESUME_TRANSFER`.
+- [x] Resume download dari chunk terakhir.
+- [x] Resume upload dari chunk terakhir.
+- [x] Test disconnect saat download.
+- [x] Test disconnect saat upload.
+- [x] Validasi checksum setelah resume.
 
 ---
 

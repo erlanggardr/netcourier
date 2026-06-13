@@ -168,6 +168,8 @@ class ProcessServer:
                             self._handle_upload_finish(conn, req_id, payload)
                         elif msg_type == "DOWNLOAD_REQUEST":
                             self._handle_download_request(conn, req_id, payload)
+                        elif msg_type == "RESUME_TRANSFER":
+                            self._handle_resume_transfer(conn, req_id, payload)
                         else:
                             self.logger.warning(f"Unhandled message type: {msg_type}")
         except (ConnectionError, socket.error):
@@ -630,14 +632,64 @@ class ProcessServer:
             self.logger.error(f"Download request failed: {e}")
             send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
 
-    def _push_download_chunks(self, conn, transfer_id, file_row):
+    def _handle_resume_transfer(self, conn, req_id, payload):
+        transfer_id = payload.get("transfer_id")
+        direction = payload.get("direction")
+        
+        user_info = self.clients.get(conn)
+        if not user_info:
+            send_packet(conn, build_error_packet("INVALID_TOKEN", request_id=req_id))
+            return
+            
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("""
+                    SELECT ft.*, f.stored_path, f.chunk_size, f.checksum_sha256
+                    FROM file_transfers ft
+                    JOIN files f ON ft.file_id = f.file_id
+                    WHERE ft.transfer_id = ? AND ft.user_id = ?
+                """, (transfer_id, user_info["user_id"]))
+                
+                row = cursor.fetchone()
+                if not row or row["status"] != "in_progress":
+                    send_packet(conn, build_error_packet("INVALID_PACKET", request_id=req_id))
+                    return
+                    
+                if direction == "upload":
+                    completed_chunks = row["completed_chunks"]
+                    send_packet(conn, build_packet("UPLOAD_READY", {
+                        "transfer_id": transfer_id,
+                        "start_chunk": completed_chunks
+                    }, request_id=req_id))
+                    
+                elif direction == "download":
+                    start_chunk = payload.get("start_chunk", 0)
+                    send_packet(conn, build_packet("DOWNLOAD_READY", {
+                        "transfer_id": transfer_id,
+                        "total_chunks": row["total_chunks"],
+                        "chunk_size": row["chunk_size"],
+                        "checksum_sha256": row["checksum_sha256"],
+                        "start_chunk": start_chunk
+                    }, request_id=req_id))
+                    
+                    import threading
+                    threading.Thread(target=self._push_download_chunks, args=(conn, transfer_id, row, start_chunk), daemon=True).start()
+                    
+        except Exception as e:
+            self.logger.error(f"Resume transfer failed: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _push_download_chunks(self, conn, transfer_id, file_row, start_chunk=0):
         stored_path = file_row["stored_path"]
         chunk_size = file_row["chunk_size"]
         total_chunks = file_row["total_chunks"]
         
         try:
             with open(stored_path, "rb") as f:
-                for i in range(total_chunks):
+                if start_chunk > 0:
+                    f.seek(start_chunk * chunk_size)
+                for i in range(start_chunk, total_chunks):
                     chunk_data = f.read(chunk_size)
                     import json
                     import struct
