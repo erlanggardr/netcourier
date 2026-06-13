@@ -223,3 +223,8 @@ __marimo__/
 
 # netcourier server fileupload database/directory
 storage/*
+
+# Test binary files
+tests/uploadbinarytest/*
+!tests/uploadbinarytest/README.txt
+!tests/uploadbinarytest/.gitkeep
