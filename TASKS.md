@@ -173,9 +173,9 @@ Gunakan checklist ini sebagai roadmap implementasi.
 ## Optional Bonus
 
 - [ ] TLS/SSL socket.
-- [ ] Emoji/reaction.
-- [ ] Admin kick user.
-- [ ] Admin delete file.
+- [x] Emoji/reaction.
+- [x] Admin kick user.
+- [x] Admin delete file.
 - [ ] Transfer queue.
 - [ ] Web dashboard monitoring sederhana.
 - [ ] Docker compose untuk Gateway + S1 + S2 + DB.
