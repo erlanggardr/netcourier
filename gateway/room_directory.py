@@ -14,9 +14,9 @@ class RoomDirectoryService:
                 cursor = conn.cursor()
                 # Get rooms and their member counts
                 cursor.execute("""
-                    SELECT r.room_name as name, r.description, COUNT(rm.member_id) as members
+                    SELECT r.room_name as name, r.description, COUNT(up.user_id) as members
                     FROM rooms r
-                    LEFT JOIN room_members rm ON r.room_id = rm.room_id AND rm.is_active = 1
+                    LEFT JOIN user_presence up ON r.room_name = up.active_room AND up.status != 'offline'
                     WHERE r.is_active = 1
                     GROUP BY r.room_id
                 """)

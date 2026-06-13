@@ -361,6 +361,21 @@ class ProcessServer:
     def _broadcast_system_event(self, room_name, message, members=None):
         if not members:
             members = self._get_room_members(room_name)
+            
+        room_id = self._get_room_id(room_name)
+        if room_id:
+            try:
+                with get_db_connection() as db_conn:
+                    cursor = db_conn.cursor()
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cursor.execute("""
+                        INSERT INTO room_messages (room_id, server_id, sender_username, message_type, content, created_at)
+                        VALUES (?, ?, 'System', 'system', ?, ?)
+                    """, (room_id, self.server_id, message, now))
+                    db_conn.commit()
+            except Exception as e:
+                self.logger.error(f"Failed to save system event: {e}")
+                
         packet = build_packet("SYSTEM_EVENT", {
             "room_name": room_name,
             "event_type": "room_event",
@@ -665,12 +680,48 @@ class ProcessServer:
                             "transfer_id": transfer_id
                         }, request_id=req_id))
                         
-                        # Broadcast system event
+                        # Broadcast system event and file message
                         user_info = self.clients[conn]
                         cursor.execute("SELECT room_name FROM rooms WHERE room_id = ?", (row["room_id"],))
                         room_row = cursor.fetchone()
                         if room_row:
-                            self._broadcast_system_event(room_row["room_name"], f"User {user_info['username']} uploaded {row['original_filename']}")
+                            room_name = room_row["room_name"]
+                            self._broadcast_system_event(room_name, f"User {user_info['username']} uploaded {row['original_filename']}")
+                            
+                            # Also broadcast as a file chat message
+                            import json
+                            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            file_msg_content = json.dumps({
+                                "file_id": row["file_id"],
+                                "filename": row["original_filename"],
+                                "size_bytes": row["size_bytes"] if "size_bytes" in row.keys() else 0
+                            })
+                            
+                            # Re-fetch size_bytes to be safe
+                            cursor.execute("SELECT size_bytes FROM files WHERE file_id = ?", (row["file_id"],))
+                            size_row = cursor.fetchone()
+                            if size_row:
+                                file_msg_content = json.dumps({
+                                    "file_id": row["file_id"],
+                                    "filename": row["original_filename"],
+                                    "size_bytes": size_row["size_bytes"]
+                                })
+                            
+                            cursor.execute("""
+                                INSERT INTO room_messages (room_id, server_id, sender_id, sender_username, message_type, content, created_at)
+                                VALUES (?, ?, ?, ?, 'file', ?, ?)
+                            """, (row["room_id"], self.server_id, user_info["user_id"], user_info["username"], file_msg_content, now))
+                            db_conn.commit()
+                            
+                            broadcast_packet = build_packet("ROOM_CHAT_BROADCAST", {
+                                "room_id": row["room_id"],
+                                "room_name": room_name,
+                                "sender_username": user_info["username"],
+                                "message": file_msg_content,
+                                "timestamp": now,
+                                "message_type": "file"
+                            }, request_id=req_id)
+                            self._broadcast_to_room(room_name, broadcast_packet)
                     else:
                         send_packet(conn, build_error_packet("CHECKSUM_FAILED", request_id=req_id))
         except Exception as e:
@@ -790,16 +841,21 @@ class ProcessServer:
             self.logger.error(f"Failed to push download chunks: {e}")
 
     def _cleanup_client(self, conn):
+        room_to_broadcast = None
+        username_left = None
+        
         with self.lock:
             if conn in self.clients:
                 user_info = self.clients[conn]
                 if user_info["current_room"]:
+                    room_to_broadcast = user_info["current_room"]
+                    username_left = user_info["username"]
                     self._leave_room_logic(conn)
-                    # Notify gateway user is now back to 'waiting' or 'offline'
-                    # If they disconnect, they are offline. Gateway will handle this via session cleanup too,
-                    # but we can be explicit.
                     self._update_presence_gateway(user_info["user_id"], user_info["username"], "offline")
                 del self.clients[conn]
+                
+        if room_to_broadcast and username_left:
+            self._broadcast_system_event(room_to_broadcast, f"User {username_left} left the room.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NetCourier Process Server")
