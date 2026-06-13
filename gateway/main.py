@@ -6,7 +6,7 @@ import sys
 import uuid
 import hashlib
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from common.constants import (
     DEFAULT_GATEWAY_HOST,
@@ -28,7 +28,7 @@ class RateLimiter:
         self.limit_seconds = limit_seconds
         # user_id -> last_message_time
         self.last_action = {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def is_allowed(self, user_id):
         with self.lock:
@@ -63,7 +63,7 @@ class Gateway:
         self.user_to_token = {}
         
         self.running = False
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def start(self):
         self.logger.info("Initializing database...")
@@ -104,11 +104,16 @@ class Gateway:
         tokens_to_remove = []
         with self.lock:
             for token, session in self.active_sessions.items():
-                if (now - session["last_seen"]).total_seconds() > timeout_seconds:
+                # Prune if expired
+                expires_at = session.get("expires_at")
+                if expires_at and now > expires_at:
+                    tokens_to_remove.append(token)
+                # Or prune if inactive for too long
+                elif (now - session["last_seen"]).total_seconds() > timeout_seconds:
                     tokens_to_remove.append(token)
         
         for token in tokens_to_remove:
-            self.logger.info(f"Pruning stale session: {token}")
+            self.logger.info(f"Pruning stale or expired session: {token}")
             self._cleanup_session(token)
 
     def _run_client_server(self):
@@ -154,6 +159,13 @@ class Gateway:
                     # Phase 9: Update last_seen
                     if token and token in self.active_sessions:
                         with self.lock:
+                            expires_at = self.active_sessions[token].get("expires_at")
+                            if expires_at and datetime.now() > expires_at:
+                                self.logger.info(f"Token expired for user {self.active_sessions[token]['username']}")
+                                self._cleanup_session(token)
+                                send_packet(conn, build_error_packet("EXPIRED_TOKEN", request_id=req_id))
+                                current_token = None
+                                continue
                             self.active_sessions[token]["last_seen"] = datetime.now()
 
                     self.logger.debug(f"Received {msg_type} from {addr}")
@@ -229,12 +241,18 @@ class Gateway:
                     # In a real app, we might notify the old socket
                     self._cleanup_session(old_token)
                 
+                expires_in = payload.get("expires_in")
+                expires_at = None
+                if isinstance(expires_in, (int, float)):
+                    expires_at = datetime.now() + timedelta(seconds=expires_in)
+
                 token = str(uuid.uuid4())
                 self.active_sessions[token] = {
                     "user_id": user["user_id"],
                     "username": username,
                     "socket": conn,
-                    "last_seen": datetime.now()
+                    "last_seen": datetime.now(),
+                    "expires_at": expires_at
                 }
                 self.user_to_token[username] = token
                 self.presence_service.update_presence(user["user_id"], username, "online", active_room="waiting")
@@ -384,12 +402,18 @@ class Gateway:
                         with self.lock:
                             if token in self.active_sessions:
                                 session = self.active_sessions[token]
-                                send_packet(conn, build_packet("TOKEN_VALID", {
-                                    "user_id": session["user_id"],
-                                    "username": session["username"]
-                                }, request_id=req_id))
+                                expires_at = session.get("expires_at")
+                                if expires_at and datetime.now() > expires_at:
+                                    self.logger.info(f"VALIDATE_TOKEN failed (expired) for token {token}")
+                                    self._cleanup_session(token)
+                                    send_packet(conn, build_error_packet("EXPIRED_TOKEN", request_id=req_id))
+                                else:
+                                    send_packet(conn, build_packet("TOKEN_VALID", {
+                                        "user_id": session["user_id"],
+                                        "username": session["username"]
+                                    }, request_id=req_id))
                             else:
-                                send_packet(conn, build_packet("TOKEN_INVALID", request_id=req_id))
+                                send_packet(conn, build_error_packet("INVALID_TOKEN", request_id=req_id))
                     
                     elif msg_type == "USER_ROOM_STATUS_UPDATE":
                         # Used by Process Server to notify user joined/left a room

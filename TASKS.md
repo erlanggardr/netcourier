@@ -149,7 +149,7 @@ Gunakan checklist ini sebagai roadmap implementasi.
 - [x] Implement filename sanitizer.
 - [x] Implement timeout client.
 - [x] Implement timeout transfer.
-- [ ] Implement token expiry optional.
+- [x] Implement token expiry optional.
 - [x] Test malformed packet.
 - [x] Test path traversal filename.
 
