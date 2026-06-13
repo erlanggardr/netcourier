@@ -167,6 +167,13 @@ class Gateway:
                                 current_token = None
                                 continue
                             self.active_sessions[token]["last_seen"] = datetime.now()
+                            # Sync to DB presence
+                            self.presence_service.update_presence(
+                                self.active_sessions[token]["user_id"],
+                                self.active_sessions[token]["username"],
+                                self.active_sessions[token]["status"],
+                                active_room=self.active_sessions[token].get("active_room")
+                            )
 
                     self.logger.debug(f"Received {msg_type} from {addr}")
                     
@@ -252,7 +259,9 @@ class Gateway:
                     "username": username,
                     "socket": conn,
                     "last_seen": datetime.now(),
-                    "expires_at": expires_at
+                    "expires_at": expires_at,
+                    "status": "online",
+                    "active_room": "waiting"
                 }
                 self.user_to_token[username] = token
                 self.presence_service.update_presence(user["user_id"], username, "online", active_room="waiting")
@@ -423,6 +432,14 @@ class Gateway:
                         server_id = payload.get("server_id")
                         active_room = payload.get("room_name")
                         self.presence_service.update_presence(user_id, username, status, server_id, active_room)
+                        
+                        # Sync internal state so heartbeats don't revert to stale room
+                        with self.lock:
+                            token = self.user_to_token.get(username)
+                            if token and token in self.active_sessions:
+                                self.active_sessions[token]["status"] = status
+                                self.active_sessions[token]["active_room"] = active_room
+                        
                         send_packet(conn, build_packet("SYSTEM_EVENT_ACK", request_id=req_id))
 
         except (ConnectionError, socket.error):

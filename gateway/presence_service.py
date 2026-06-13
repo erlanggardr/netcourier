@@ -32,10 +32,12 @@ class PresenceService:
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
+                # Only show users seen in the last 60 seconds
                 cursor.execute("""
                     SELECT username, status, active_room
                     FROM user_presence
                     WHERE status != 'offline'
+                    AND last_seen_at >= datetime('now', '-60 seconds', 'localtime')
                     ORDER BY username ASC
                 """)
                 return [dict(row) for row in cursor.fetchall()]

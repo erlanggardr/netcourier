@@ -92,6 +92,10 @@ class RoomConnection:
 
         if msg_type == "ROOM_CHAT_BROADCAST":
             self.app.run_in_ui(self.app.on_room_message, payload)
+        elif msg_type == "ROOM_REACTION_BROADCAST":
+            self.app.run_in_ui(self.app.on_room_reaction, payload)
+        elif msg_type == "ROOM_TYPING_BROADCAST":
+            self.app.run_in_ui(self.app.on_room_typing, payload)
         elif msg_type == "SYSTEM_EVENT":
             self.app.run_in_ui(self.app.on_room_system_event, payload)
         elif msg_type == "ROOM_HISTORY_RESPONSE":

@@ -191,6 +191,18 @@ CREATE TABLE IF NOT EXISTS performance_metrics (
     FOREIGN KEY (server_id) REFERENCES backend_servers(server_id)
 );
 
+CREATE TABLE IF NOT EXISTS message_reactions (
+    reaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    emoji VARCHAR(10) NOT NULL,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (message_id) REFERENCES room_messages(message_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    UNIQUE (message_id, user_id, emoji)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_presence_status ON user_presence(status);
 CREATE INDEX IF NOT EXISTS idx_rooms_server_id ON rooms(server_id);

@@ -4,6 +4,7 @@ import logging
 import argparse
 import time
 import sys
+import sqlite3
 from datetime import datetime, timedelta
 
 from common.constants import (
@@ -225,6 +226,16 @@ class ProcessServer:
                                 send_packet(conn, build_error_packet("RATE_LIMIT_EXCEEDED", request_id=req_id))
                                 continue
                             self._handle_room_chat_send(conn, req_id, payload)
+                        elif msg_type == "ROOM_MESSAGE_REACTION":
+                            self._handle_room_message_reaction(conn, req_id, payload)
+                        elif msg_type == "ROOM_KICK_USER":
+                            self._handle_room_kick_user(conn, req_id, payload)
+                        elif msg_type == "ROOM_DELETE_FILE":
+                            self._handle_room_delete_file(conn, req_id, payload)
+                        elif msg_type == "ROOM_TYPING_INDICATOR":
+                            self._handle_room_typing_indicator(conn, req_id, payload)
+                        elif msg_type == "ROOM_MEMBER_LIST_REQUEST":
+                            self._handle_room_member_list_request(conn, req_id, payload)
                         elif msg_type == "ROOM_HISTORY_REQUEST":
                             self._handle_room_history_request(conn, req_id, payload)
                         elif msg_type == "FILE_LIST_REQUEST":
@@ -431,7 +442,9 @@ class ProcessServer:
                     INSERT INTO room_messages (room_id, server_id, sender_id, sender_username, message_type, content, created_at)
                     VALUES (?, ?, ?, ?, 'text', ?, ?)
                 """, (room_id, self.server_id, user_info["user_id"], user_info["username"], message, now))
+                message_id = cursor.lastrowid
                 db_conn.commit()
+                self.logger.info(f"DEBUG: Generated message_id: {message_id}")
         except Exception as e:
             self.logger.error(f"Failed to save room message: {e}")
             send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
@@ -439,14 +452,186 @@ class ProcessServer:
 
         # Broadcast
         broadcast_packet = build_packet("ROOM_CHAT_BROADCAST", {
+            "message_id": message_id,
             "room_id": room_id,
             "room_name": room_name,
             "sender_username": user_info["username"],
             "message": message,
-            "timestamp": now
+            "timestamp": now,
+            "reactions": {}
         }, request_id=req_id)
         
         self._broadcast_to_room(room_name, broadcast_packet)
+
+    def _handle_room_message_reaction(self, conn, req_id, payload):
+        message_id = payload.get("message_id")
+        emoji = payload.get("emoji")
+        action = payload.get("action", "add") # 'add' or 'remove'
+        
+        user_info = self.clients[conn]
+        room_name = user_info["current_room"]
+        
+        if not all([message_id, emoji, room_name]):
+            send_packet(conn, build_error_packet("MISSING_FIELD", request_id=req_id))
+            return
+
+        try:
+            message_id = int(message_id)
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                if action == "add":
+                    try:
+                        cursor.execute("""
+                            INSERT INTO message_reactions (message_id, user_id, username, emoji, created_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (message_id, user_info["user_id"], user_info["username"], emoji, now))
+                    except sqlite3.IntegrityError:
+                        pass # Already exists
+                else:
+                    cursor.execute("""
+                        DELETE FROM message_reactions 
+                        WHERE message_id = ? AND user_id = ? AND emoji = ?
+                    """, (message_id, user_info["user_id"], emoji))
+                
+                db_conn.commit()
+                
+                # Get all reactions for this message to broadcast the updated state
+                cursor.execute("""
+                    SELECT emoji, COUNT(*) as count, GROUP_CONCAT(username) as usernames
+                    FROM message_reactions
+                    WHERE message_id = ?
+                    GROUP BY emoji
+                """, (message_id,))
+                
+                all_reactions = {}
+                for row in cursor.fetchall():
+                    all_reactions[row["emoji"]] = {
+                        "count": row["count"],
+                        "usernames": row["usernames"].split(",") if row["usernames"] else []
+                    }
+                
+                broadcast_packet = build_packet("ROOM_REACTION_BROADCAST", {
+                    "message_id": message_id,
+                    "room_name": room_name,
+                    "emoji": emoji,
+                    "action": action,
+                    "username": user_info["username"],
+                    "reactions": all_reactions
+                }, request_id=req_id)
+                
+                self._broadcast_to_room(room_name, broadcast_packet)
+        except Exception as e:
+            self.logger.error(f"Failed to handle reaction ({action}): {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _is_room_owner(self, user_id, room_name):
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                cursor.execute("SELECT created_by FROM rooms WHERE room_name = ?", (room_name,))
+                row = cursor.fetchone()
+                if row and row["created_by"] == user_id:
+                    return True
+        except Exception as e:
+            self.logger.error(f"Error checking room owner: {e}")
+        return False
+
+    def _handle_room_kick_user(self, conn, req_id, payload):
+        target_username = payload.get("username")
+        user_info = self.clients[conn]
+        room_name = user_info["current_room"]
+        
+        if not self._is_room_owner(user_info["user_id"], room_name):
+            send_packet(conn, build_error_packet("PERMISSION_DENIED", request_id=req_id))
+            return
+
+        # Find target connection
+        target_conn = None
+        with self.lock:
+            for c, info in self.clients.items():
+                if info["username"] == target_username and info["current_room"] == room_name:
+                    target_conn = c
+                    break
+        
+        if target_conn:
+            send_packet(target_conn, build_packet("SYSTEM_EVENT", {
+                "room_name": room_name,
+                "message": "You have been kicked from the room by the owner.",
+                "event_type": "kicked"
+            }))
+            self._cleanup_client(target_conn)
+            try:
+                target_conn.close()
+            except:
+                pass
+            
+            self._broadcast_system_event(room_name, f"User {target_username} has been kicked by the owner.")
+            send_packet(conn, build_packet("KICK_USER_OK", {"username": target_username}, request_id=req_id))
+        else:
+            send_packet(conn, build_error_packet("USER_NOT_FOUND", request_id=req_id))
+
+    def _handle_room_delete_file(self, conn, req_id, payload):
+        file_id = payload.get("file_id")
+        user_info = self.clients[conn]
+        room_name = user_info["current_room"]
+        
+        if not self._is_room_owner(user_info["user_id"], room_name):
+            send_packet(conn, build_error_packet("PERMISSION_DENIED", request_id=req_id))
+            return
+
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                # Logical delete from files table
+                cursor.execute("UPDATE files SET status = 'deleted' WHERE file_id = ?", (file_id,))
+                # Logical delete from room_messages (the file card)
+                cursor.execute("UPDATE room_messages SET is_deleted = 1 WHERE message_type = 'file' AND content LIKE ?", (f'%\"file_id\": {file_id}%',))
+                db_conn.commit()
+                
+            self._broadcast_system_event(room_name, f"A file was deleted by the owner.")
+            send_packet(conn, build_packet("DELETE_FILE_OK", {"file_id": file_id}, request_id=req_id))
+        except Exception as e:
+            self.logger.error(f"Failed to delete file: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
+
+    def _handle_room_typing_indicator(self, conn, req_id, payload):
+        is_typing = payload.get("is_typing", False)
+        user_info = self.clients[conn]
+        room_name = user_info["current_room"]
+        
+        if not room_name:
+            return
+
+        broadcast_packet = build_packet("ROOM_TYPING_BROADCAST", {
+            "room_name": room_name,
+            "username": user_info["username"],
+            "is_typing": is_typing
+        }, request_id=req_id)
+        
+        # Don't send back to the sender
+        with self.lock:
+            if room_name in self.rooms:
+                for c in self.rooms[room_name]:
+                    if c != conn:
+                        try:
+                            send_packet(c, broadcast_packet)
+                        except:
+                            pass
+
+    def _handle_room_member_list_request(self, conn, req_id, payload):
+        room_name = payload.get("room_name")
+        user_info = self.clients[conn]
+        if user_info["current_room"] != room_name:
+            send_packet(conn, build_error_packet("NOT_IN_ROOM", request_id=req_id))
+            return
+
+        members = self._get_room_members(room_name)
+        send_packet(conn, build_packet("ROOM_MEMBER_LIST_RESPONSE", {
+            "room_name": room_name,
+            "members": members
+        }, request_id=req_id))
 
     def _handle_room_history_request(self, conn, req_id, payload):
         room_name = payload.get("room_name")
@@ -466,7 +651,7 @@ class ProcessServer:
             with get_db_connection() as db_conn:
                 cursor = db_conn.cursor()
                 cursor.execute("""
-                    SELECT sender_username, content, created_at, message_type
+                    SELECT message_id, sender_username, content, created_at, message_type
                     FROM room_messages
                     WHERE room_id = ? AND is_deleted = 0
                     ORDER BY created_at DESC
@@ -476,11 +661,29 @@ class ProcessServer:
                 rows = cursor.fetchall()
                 messages = []
                 for row in reversed(rows): # Reverse to chronological
+                    msg_id = row["message_id"]
+                    # Fetch reactions for this message
+                    cursor.execute("""
+                        SELECT emoji, COUNT(*) as count, GROUP_CONCAT(username) as usernames
+                        FROM message_reactions
+                        WHERE message_id = ?
+                        GROUP BY emoji
+                    """, (msg_id,))
+                    
+                    reactions = {}
+                    for r_row in cursor.fetchall():
+                        reactions[r_row["emoji"]] = {
+                            "count": r_row["count"],
+                            "usernames": r_row["usernames"].split(",") if r_row["usernames"] else []
+                        }
+
                     messages.append({
+                        "message_id": msg_id,
                         "sender_username": row["sender_username"],
                         "message": row["content"],
                         "timestamp": row["created_at"],
-                        "message_type": row["message_type"]
+                        "message_type": row["message_type"],
+                        "reactions": reactions
                     })
                 
                 response = build_packet("ROOM_HISTORY_RESPONSE", {

@@ -12,11 +12,13 @@ class RoomDirectoryService:
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                # Get rooms and their member counts
+                # Get rooms and their member counts (only users seen in last 60 seconds)
                 cursor.execute("""
-                    SELECT r.room_name as name, r.description, COUNT(up.user_id) as members
+                    SELECT r.room_name as name, r.description, r.created_by as owner_id, COUNT(up.user_id) as members
                     FROM rooms r
-                    LEFT JOIN user_presence up ON r.room_name = up.active_room AND up.status != 'offline'
+                    LEFT JOIN user_presence up ON r.room_name = up.active_room 
+                        AND up.status != 'offline'
+                        AND up.last_seen_at >= datetime('now', '-60 seconds', 'localtime')
                     WHERE r.is_active = 1
                     GROUP BY r.room_id
                 """)

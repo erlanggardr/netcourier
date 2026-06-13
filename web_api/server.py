@@ -28,6 +28,16 @@ class MockApp:
     def on_room_message(self, payload):
         self.session.push_event({"type": "ROOM_MESSAGE", "payload": payload})
         
+    def on_room_reaction(self, payload):
+        self.session.push_event({"type": "ROOM_REACTION_BROADCAST", "payload": payload})
+        
+    def on_room_typing(self, payload):
+        self.session.push_event({"type": "ROOM_TYPING_BROADCAST", "payload": payload})
+        
+    def on_room_member_list_response(self, payload):
+        # This is a response to a request, but we can also use it for real-time updates if needed
+        self.session.push_event({"type": "ROOM_MEMBER_LIST", "payload": payload})
+        
     def on_room_system_event(self, payload):
         self.session.push_event({"type": "SYSTEM_EVENT", "payload": payload})
         
@@ -215,14 +225,26 @@ class WebServer:
             self.serve_static(conn, path_only)
 
     def _sync_request(self, conn_obj, msg_type, payload):
+        if not conn_obj:
+            return None
         ev = threading.Event()
         res_container = {}
         def cb(header):
             res_container["header"] = header
             ev.set()
-        if not conn_obj.send_request(msg_type, payload, callback=cb):
+        
+        # Ensure we don't block forever if sending fails
+        try:
+            if not conn_obj.send_request(msg_type, payload, callback=cb):
+                return None
+        except Exception as e:
+            print(f"Sync request send error: {e}")
             return None
-        ev.wait(timeout=10)
+            
+        # Wait with a shorter, safer timeout
+        if not ev.wait(timeout=5):
+            print(f"Sync request {msg_type} timed out")
+            return None
         return res_container.get("header")
 
     def handle_api(self, conn, method, path, headers, body, qs, raw_body=b""):
@@ -230,31 +252,37 @@ class WebServer:
         
         if path == "/api/register" and method == "POST":
             # Temporarily use a fresh session to register
-            temp_session = WebSession("temp")
-            resp = self._sync_request(temp_session.gateway_conn, "REGISTER", body)
-            temp_session.gateway_conn.disconnect()
-            if resp and resp.get("type") == "REGISTER_OK":
-                self.send_response(conn, 200, {"success": True, "username": resp["payload"]["username"]})
-            else:
-                self.send_response(conn, 400, {"success": False, "error": resp.get("type") if resp else "TIMEOUT"})
+            try:
+                temp_session = WebSession("temp-" + str(uuid.uuid4()))
+                resp = self._sync_request(temp_session.gateway_conn, "REGISTER", body)
+                temp_session.gateway_conn.disconnect()
+                if resp and resp.get("type") == "REGISTER_OK":
+                    self.send_response(conn, 200, {"success": True, "username": resp["payload"]["username"]})
+                else:
+                    self.send_response(conn, 400, {"success": False, "error": resp.get("type") if resp else "TIMEOUT"})
+            except Exception as e:
+                self.send_response(conn, 500, {"error": str(e)})
             return
 
         if path == "/api/login" and method == "POST":
             session_id = str(uuid.uuid4())
-            new_session = WebSession(session_id)
-            resp = self._sync_request(new_session.gateway_conn, "LOGIN", body)
-            if resp and resp.get("type") == "LOGIN_OK":
-                new_session.app.token = resp.get("token")
-                new_session.username = body.get("username")
-                self.sessions[session_id] = new_session
-                self.send_response(conn, 200, {
-                    "success": True, 
-                    "session_id": session_id, 
-                    "user": resp["payload"]
-                })
-            else:
-                new_session.gateway_conn.disconnect()
-                self.send_response(conn, 400, {"success": False, "error": resp.get("type") if resp else "TIMEOUT"})
+            try:
+                new_session = WebSession(session_id)
+                resp = self._sync_request(new_session.gateway_conn, "LOGIN", body)
+                if resp and resp.get("type") == "LOGIN_OK":
+                    new_session.app.token = resp.get("token")
+                    new_session.username = body.get("username")
+                    self.sessions[session_id] = new_session
+                    self.send_response(conn, 200, {
+                        "success": True, 
+                        "session_id": session_id, 
+                        "user": resp["payload"]
+                    })
+                else:
+                    new_session.gateway_conn.disconnect()
+                    self.send_response(conn, 400, {"success": False, "error": resp.get("payload", {}).get("message") if resp else "Gateway timeout"})
+            except Exception as e:
+                self.send_response(conn, 500, {"error": f"Login failed: {e}"})
             return
 
         if not session:
@@ -346,9 +374,50 @@ class WebServer:
             self.send_response(conn, 400, {"error": "Failed to get room history"})
             return
 
+        if path == "/api/rooms/members" and method == "GET":
+            if session.room_conn:
+                resp = self._sync_request(session.room_conn, "ROOM_MEMBER_LIST_REQUEST", {"room_name": qs.get("room_name")})
+                if resp and resp.get("type") == "ROOM_MEMBER_LIST_RESPONSE":
+                    self.send_response(conn, 200, {"members": resp["payload"]["members"]})
+                    return
+            self.send_response(conn, 400, {"error": "Failed to get room members"})
+            return
+
         if path == "/api/rooms/messages" and method == "POST":
             if session.room_conn:
                 session.room_conn.send_request("ROOM_CHAT_SEND", body)
+                self.send_response(conn, 200, {"success": True})
+            else:
+                self.send_response(conn, 400, {"error": "Not connected to a room"})
+            return
+
+        if path == "/api/rooms/reactions" and method == "POST":
+            if session.room_conn:
+                session.room_conn.send_request("ROOM_MESSAGE_REACTION", body)
+                self.send_response(conn, 200, {"success": True})
+            else:
+                self.send_response(conn, 400, {"error": "Not connected to a room"})
+            return
+
+        if path == "/api/rooms/typing" and method == "POST":
+            if session.room_conn:
+                session.room_conn.send_request("ROOM_TYPING_INDICATOR", body)
+                self.send_response(conn, 200, {"success": True})
+            else:
+                self.send_response(conn, 400, {"error": "Not connected to a room"})
+            return
+
+        if path == "/api/rooms/kick" and method == "POST":
+            if session.room_conn:
+                session.room_conn.send_request("ROOM_KICK_USER", body)
+                self.send_response(conn, 200, {"success": True})
+            else:
+                self.send_response(conn, 400, {"error": "Not connected to a room"})
+            return
+
+        if path == "/api/rooms/files/delete" and method == "POST":
+            if session.room_conn:
+                session.room_conn.send_request("ROOM_DELETE_FILE", body)
                 self.send_response(conn, 200, {"success": True})
             else:
                 self.send_response(conn, 400, {"error": "Not connected to a room"})

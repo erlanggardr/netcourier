@@ -25,6 +25,12 @@
         ::-webkit-scrollbar-track { background: #121212; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #555; }
+        
+        /* Explicit Hover for Reactions */
+        .message-bubble-wrapper:hover .reaction-menu {
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
     </style>
 </head>
 <body class="bg-darker text-gray-200 font-sans h-screen overflow-hidden flex flex-col">
@@ -102,31 +108,56 @@
         </div>
 
         <!-- View: Room Chat -->
-        <div id="view-room" class="hidden absolute inset-0 flex flex-col bg-darker z-40">
-            <div class="p-4 bg-dark border-b border-gray-800 flex justify-between items-center shrink-0">
-                <div class="flex items-center">
-                    <button id="btn-leave-room" class="mr-4 text-gray-400 hover:text-white transition-colors">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                    </button>
-                    <h3 class="font-semibold text-lg" id="room-title">Room Name</h3>
+        <div id="view-room" class="hidden absolute inset-0 flex bg-darker z-40">
+            <!-- Sidebar: Room Members -->
+            <div class="w-64 bg-dark border-r border-gray-800 flex flex-col hidden lg:flex">
+                <div class="p-4 border-b border-gray-800 flex items-center justify-between">
+                    <h2 class="font-bold text-gray-200">Room Members</h2>
+                    <span id="room-member-count" class="bg-gray-800 text-[10px] px-2 py-0.5 rounded-full text-gray-400">0</span>
                 </div>
-                <button id="btn-room-files" class="bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded text-sm transition-colors">Files</button>
+                <div id="room-members-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                    <!-- Members listed here -->
+                </div>
             </div>
-            <div id="room-chat-history" class="flex-1 overflow-y-auto p-4 space-y-4">
-                <!-- Chat messages -->
-            </div>
-            <div class="p-4 bg-dark border-t border-gray-800 shrink-0">
-                <form id="room-chat-form" class="flex gap-2 items-center">
-                    <button type="button" id="btn-chat-attach" class="text-gray-400 hover:text-white transition-colors" title="Attach file">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
-                    </button>
-                    <input type="text" id="room-chat-input" class="flex-1 bg-darker border border-gray-700 rounded-full px-4 py-2 focus:outline-none focus:border-primary transition-colors" placeholder="Type a message..." autocomplete="off">
-                    <button type="submit" class="bg-primary hover:bg-secondary rounded-full w-10 h-10 flex items-center justify-center transition-colors shrink-0">
-                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                    </button>
-                </form>
-                <!-- Hidden file input for attachment -->
-                <input type="file" id="chat-file-input" class="hidden">
+
+            <!-- Main Chat -->
+            <div class="flex-1 flex flex-col min-w-0">
+                <div class="p-4 bg-dark border-b border-gray-800 flex justify-between items-center shrink-0">
+                    <div class="flex items-center min-w-0">
+                        <button id="btn-leave-room" class="mr-4 text-gray-400 hover:text-white transition-colors">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        </button>
+                        <h3 class="font-semibold text-lg truncate" id="room-title">Room Name</h3>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="btn-room-files" class="bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded text-sm transition-colors">Files</button>
+                    </div>
+                </div>
+                <div id="room-chat-history" class="flex-1 overflow-y-auto p-4 space-y-4">
+                    <!-- Chat messages -->
+                </div>
+                <div id="typing-indicator" class="px-4 py-1 text-xs text-gray-500 italic h-5"></div>
+                <div class="p-4 bg-dark border-t border-gray-800 shrink-0">
+                    <form id="room-chat-form" class="flex gap-2 items-center">
+                        <button type="button" id="btn-chat-attach" class="text-gray-400 hover:text-white transition-colors" title="Attach file">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                        </button>
+                        <div class="relative">
+                            <button type="button" id="btn-emoji-picker" class="text-gray-400 hover:text-white transition-colors p-1" title="Emojis">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </button>
+                            <div id="emoji-menu" class="hidden absolute bottom-full left-0 mb-2 p-2 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl grid grid-cols-6 gap-1 z-30 min-w-[200px]">
+                                <!-- Emojis injected via JS -->
+                            </div>
+                        </div>
+                        <input type="text" id="room-chat-input" class="flex-1 bg-darker border border-gray-700 rounded-full px-4 py-2 focus:outline-none focus:border-primary transition-colors" placeholder="Type a message..." autocomplete="off">
+                        <button type="submit" class="bg-primary hover:bg-secondary rounded-full w-10 h-10 flex items-center justify-center transition-colors shrink-0">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                        </button>
+                    </form>
+                    <!-- Hidden file input for attachment -->
+                    <input type="file" id="chat-file-input" class="hidden">
+                </div>
             </div>
         </div>
         

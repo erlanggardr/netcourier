@@ -2,8 +2,34 @@
 let sessionId = localStorage.getItem('sessionId') || null;
 let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
 let currentRoom = localStorage.getItem('currentRoom') || null;
+let currentRoomData = null;
 let currentPmUser = null;
 let isRegistering = false;
+
+// Global Error Handler
+window.onerror = function(msg, url, line, col, error) {
+    showToast(`JS Error: ${msg}`, 'error');
+    console.error(error);
+};
+
+// --- Admin Actions ---
+window.kickUser = async function(username) {
+    if (!confirm(`Are you sure you want to kick ${username}?`)) return;
+    try {
+        await apiCall('/rooms/kick', 'POST', { username });
+        showToast(`User ${username} kicked.`, 'success');
+    } catch (e) {}
+}
+
+window.deleteFile = async function(fileId) {
+    if (!confirm(`Are you sure you want to delete this file?`)) return;
+    try {
+        await apiCall('/rooms/files/delete', 'POST', { file_id: fileId });
+        showToast(`File deleted.`, 'success');
+        // Refresh room history to hide deleted file immediately
+        if (currentRoom) joinRoom(currentRoom);
+    } catch (e) {}
+}
 
 // DOM Elements
 const views = {
@@ -22,6 +48,8 @@ const UI = {
     pmTitle: document.getElementById('pm-title'),
     roomChatHistory: document.getElementById('room-chat-history'),
     roomTitle: document.getElementById('room-title'),
+    roomMembersList: document.getElementById('room-members-list'),
+    roomMemberCount: document.getElementById('room-member-count'),
     toastContainer: document.getElementById('toast-container'),
     modalCreateRoom: document.getElementById('modal-create-room'),
     modalRoomFiles: document.getElementById('modal-room-files'),
@@ -250,6 +278,48 @@ document.getElementById('pm-form').addEventListener('submit', async (e) => {
 });
 
 // --- Room Flow ---
+let typingTimeout = null;
+let roomMembersInterval = null;
+
+async function fetchRoomMembers() {
+    if (!currentRoom || views.room.classList.contains('hidden')) return;
+    try {
+        const data = await apiCall(`/rooms/members?room_name=${encodeURIComponent(currentRoom)}`);
+        if (!UI.roomMembersList) return;
+        
+        UI.roomMembersList.innerHTML = '';
+        UI.roomMemberCount.textContent = data.members.length;
+        
+        data.members.forEach(username => {
+            const isMe = username === currentUser.username;
+            const div = document.createElement('div');
+            div.className = 'flex items-center p-2 rounded hover:bg-gray-800/50 transition-colors';
+            div.innerHTML = `
+                <div class="w-2 h-2 rounded-full ${isMe ? 'bg-blue-500' : 'bg-green-500'} mr-2"></div>
+                <span class="text-sm ${isMe ? 'font-bold text-white' : 'text-gray-300'}">${username}</span>
+                ${isMe ? '<span class="ml-2 text-[9px] bg-gray-700 px-1 rounded text-gray-400">ME</span>' : ''}
+            `;
+            UI.roomMembersList.appendChild(div);
+        });
+    } catch (e) {}
+}
+
+function sendTypingIndicator(isTyping) {
+    if (!currentRoom) return;
+    apiCall('/rooms/typing', 'POST', { is_typing: isTyping }).catch(() => {});
+}
+
+document.getElementById('room-chat-input').addEventListener('input', () => {
+    if (!typingTimeout) {
+        sendTypingIndicator(true);
+    }
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        sendTypingIndicator(false);
+        typingTimeout = null;
+    }, 3000);
+});
+
 document.getElementById('btn-create-room').addEventListener('click', () => {
     UI.modalCreateRoom.classList.remove('hidden');
 });
@@ -278,12 +348,25 @@ window.joinRoom = async function(roomName) {
         currentRoom = roomName;
         localStorage.setItem('currentRoom', roomName);
         UI.roomTitle.textContent = roomName;
+        
+        // Fetch room info to get owner_id
+        const roomsData = await apiCall('/rooms');
+        currentRoomData = roomsData.rooms.find(r => r.name === roomName);
+        
         showView('room');
+        
+        // Start member list updates
+        fetchRoomMembers();
+        if (roomMembersInterval) clearInterval(roomMembersInterval);
+        roomMembersInterval = setInterval(fetchRoomMembers, 5000);
+
         UI.roomChatHistory.innerHTML = '<div class="text-center text-gray-500 text-sm mt-4">Loading history...</div>';
         
         const data = await apiCall(`/rooms/messages?room_name=${roomName}`);
         UI.roomChatHistory.innerHTML = '';
-        data.messages.forEach(msg => appendMessage(UI.roomChatHistory, msg.sender_username, msg.message, msg.timestamp, msg.message_type));
+        data.messages.forEach(msg => {
+            appendMessage(UI.roomChatHistory, msg.sender_username, msg.message, msg.timestamp, msg.message_type, msg.message_id, msg.reactions);
+        });
         UI.roomChatHistory.scrollTop = UI.roomChatHistory.scrollHeight;
     } catch(e) {}
 }
@@ -292,6 +375,7 @@ document.getElementById('btn-leave-room').addEventListener('click', async () => 
     try {
         await apiCall('/rooms/leave', 'POST');
         currentRoom = null;
+        if (roomMembersInterval) clearInterval(roomMembersInterval);
         localStorage.removeItem('currentRoom');
         showView('dashboard');
         refreshDashboard();
@@ -434,7 +518,98 @@ window.downloadFile = async function(fileId, filename) {
     } catch (e) {}
 }
 
-function appendMessage(container, sender, text, time, type = 'text') {
+const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👏", "🤔", "👀", "✨", "🚀"];
+
+// Initialize Emoji Menu for Input
+const emojiMenu = document.getElementById('emoji-menu');
+COMMON_EMOJIS.forEach(emoji => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hover:bg-gray-800 p-2 rounded transition-colors text-lg';
+    btn.textContent = emoji;
+    btn.onclick = () => {
+        const input = document.getElementById('room-chat-input');
+        input.value += emoji;
+        input.focus();
+        emojiMenu.classList.add('hidden');
+    };
+    emojiMenu.appendChild(btn);
+});
+
+document.getElementById('btn-emoji-picker').addEventListener('click', (e) => {
+    e.stopPropagation();
+    emojiMenu.classList.toggle('hidden');
+});
+
+document.addEventListener('click', () => {
+    emojiMenu.classList.add('hidden');
+});
+
+async function addReaction(messageId, emoji, action = 'add') {
+    if (!messageId) return;
+    try {
+        await apiCall('/rooms/reactions', 'POST', { message_id: messageId, emoji: emoji, action: action });
+    } catch (e) {}
+}
+window.addReaction = addReaction;
+
+function toggleReaction(messageId, emoji) {
+    const msgDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!msgDiv) return addReaction(messageId, emoji, 'add');
+    
+    // Simple logic: if the emoji exists and has our username in tooltip (usernames are comma separated)
+    const reactionSpan = Array.from(msgDiv.querySelectorAll('.reaction-container span'))
+        .find(s => s.innerHTML.includes(emoji));
+    
+    let action = 'add';
+    if (reactionSpan && reactionSpan.title.includes(currentUser.username)) {
+        action = 'remove';
+    }
+    
+    addReaction(messageId, emoji, action);
+}
+window.toggleReaction = toggleReaction;
+
+function updateMessageReactions(messageId, reactions) {
+    console.log("Updating reactions for message", messageId, reactions);
+    const msgDiv = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!msgDiv) {
+        console.error("Could not find message element for ID", messageId);
+        return;
+    }
+    
+    let reactionContainer = msgDiv.querySelector('.reaction-container');
+    if (!reactionContainer) {
+        reactionContainer = document.createElement('div');
+        reactionContainer.className = 'reaction-container flex flex-wrap gap-1 mt-1';
+        msgDiv.querySelector('.message-bubble-wrapper').appendChild(reactionContainer);
+    }
+    
+    reactionContainer.innerHTML = '';
+    if (!reactions || Object.keys(reactions).length === 0) {
+        reactionContainer.classList.add('hidden');
+        return;
+    }
+    reactionContainer.classList.remove('hidden');
+
+    for (const [emoji, data] of Object.entries(reactions)) {
+        const count = typeof data === 'object' ? data.count : data;
+        const usernames = typeof data === 'object' ? data.usernames : [];
+        const hasReacted = usernames.includes(currentUser.username);
+        
+        const span = document.createElement('span');
+        span.className = `inline-flex items-center ${hasReacted ? 'bg-primary/30 border-primary/50' : 'bg-black/30 border-transparent'} hover:bg-black/50 px-1.5 py-0.5 rounded text-xs cursor-pointer transition-colors border hover:border-gray-600`;
+        span.title = usernames.join(', ');
+        span.innerHTML = `<span>${emoji}</span> <span class="ml-1 font-bold text-gray-300">${count}</span>`;
+        span.onclick = (e) => {
+            e.stopPropagation();
+            toggleReaction(messageId, emoji);
+        };
+        reactionContainer.appendChild(span);
+    }
+}
+
+function appendMessage(container, sender, text, time, type = 'text', messageId = null, initialReactions = null) {
     if (type === 'system') {
         appendSystemMessage(container, text);
         return;
@@ -442,18 +617,21 @@ function appendMessage(container, sender, text, time, type = 'text') {
     
     const isMe = sender === currentUser.username;
     const div = document.createElement('div');
-    div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-2`;
+    div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-4 group relative`;
+    if (messageId) div.setAttribute('data-message-id', messageId);
     
     let contentHtml = text;
     if (type === 'file') {
         try {
-            const fileData = JSON.parse(text);
+            const fileData = typeof text === 'string' ? JSON.parse(text) : text;
             contentHtml = `
-                <div class="flex items-center gap-3 p-2 bg-black/20 rounded cursor-pointer hover:bg-black/30 transition-colors" onclick="downloadFile(${fileData.file_id}, '${fileData.filename.replace(/'/g, "\\'")}')">
-                    <svg class="w-8 h-8 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <div class="flex items-center gap-3 p-3 bg-black/20 rounded-lg cursor-pointer hover:bg-black/30 transition-colors border border-gray-700/50" onclick="downloadFile(${fileData.file_id}, '${fileData.filename.replace(/'/g, "\\'")}')">
+                    <div class="bg-primary/20 p-2 rounded-lg">
+                        <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </div>
                     <div class="flex flex-col text-sm truncate">
-                        <span class="font-medium truncate underline">${fileData.filename}</span>
-                        <span class="text-xs opacity-75">${formatBytes(fileData.size_bytes)} • Click to download</span>
+                        <span class="font-medium truncate text-gray-200">${fileData.filename}</span>
+                        <span class="text-xs text-gray-500">${formatBytes(fileData.size_bytes)}</span>
                     </div>
                 </div>
             `;
@@ -462,13 +640,40 @@ function appendMessage(container, sender, text, time, type = 'text') {
         }
     }
 
+    // Reaction Button and Menu
+    const isOwner = currentRoomData && currentRoomData.owner_id === currentUser.user_id;
+    const adminActionsHtml = isOwner ? `
+        <div class="admin-actions flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            ${type === 'file' ? `<button class="text-[9px] bg-red-900/50 hover:bg-red-800 px-1.5 py-0.5 rounded text-red-200 transition-colors" onclick="window.deleteFile(${messageId})">Delete File</button>` : ''}
+            ${!isMe ? `<button class="text-[9px] bg-red-900/50 hover:bg-red-800 px-1.5 py-0.5 rounded text-red-200 transition-colors" onclick="window.kickUser('${sender}')">Kick</button>` : ''}
+        </div>
+    ` : '';
+
+    const reactionBtnHtml = messageId ? `
+        <div class="reaction-menu absolute ${isMe ? 'right-[calc(100%-5px)]' : 'left-[calc(100%-5px)]'} top-0 opacity-0 pointer-events-none transition-all duration-200 flex gap-1 bg-gray-900 border border-gray-700 rounded-full p-1.5 shadow-2xl z-20 hover:scale-105">
+            ${COMMON_EMOJIS.slice(0, 6).map(e => `
+                <button class="hover:scale-125 transition-transform px-1.5 py-0.5 rounded-full hover:bg-gray-800" onclick="window.toggleReaction(${messageId}, '${e}')">${e}</button>
+            `).join('')}
+        </div>
+    ` : '';
+
     div.innerHTML = `
-        <span class="text-xs text-gray-500 mb-1 px-1">${sender} • ${time}</span>
-        <div class="px-4 py-2 rounded-lg max-w-[80%] ${isMe ? 'bg-primary text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'} break-words overflow-hidden">
-            ${contentHtml}
+        <span class="text-[10px] uppercase tracking-wider text-gray-600 mb-1 px-1 font-bold">${sender} • ${time}</span>
+        <div class="message-bubble-wrapper relative flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%]">
+            ${reactionBtnHtml}
+            <div class="px-4 py-2 rounded-2xl shadow-sm ${isMe ? 'bg-primary text-white rounded-tr-none' : 'bg-gray-800 text-gray-200 rounded-tl-none'} break-words w-full">
+                ${contentHtml}
+            </div>
+            ${adminActionsHtml}
+            <div class="reaction-container flex flex-wrap gap-1 mt-1 empty:hidden"></div>
         </div>
     `;
     container.appendChild(div);
+    
+    if (messageId && initialReactions) {
+        updateMessageReactions(messageId, initialReactions);
+    }
+    
     container.scrollTop = container.scrollHeight;
 }
 
@@ -485,6 +690,25 @@ function appendSystemMessage(container, text) {
 }
 
 // --- Event Polling ---
+let typingUsers = new Set();
+function handleTypingIndicator(payload) {
+    if (payload.room_name !== currentRoom) return;
+    
+    if (payload.is_typing) {
+        typingUsers.add(payload.username);
+    } else {
+        typingUsers.delete(payload.username);
+    }
+    
+    const indicatorDiv = document.getElementById('typing-indicator');
+    if (typingUsers.size === 0) {
+        indicatorDiv.textContent = '';
+    } else {
+        const users = Array.from(typingUsers).join(', ');
+        indicatorDiv.textContent = `${users} ${typingUsers.size === 1 ? 'is' : 'are'} typing...`;
+    }
+}
+
 async function startPolling() {
     if (!sessionId) return;
     try {
@@ -514,14 +738,16 @@ function handleEvent(ev) {
     } else if (ev.type === "ROOM_MESSAGE") {
         const { sender_username, message, timestamp, message_type } = ev.payload;
         if (currentRoom) {
-            appendMessage(UI.roomChatHistory, sender_username, message, timestamp, message_type || 'text');
+            appendMessage(UI.roomChatHistory, sender_username, message, timestamp, message_type || 'text', ev.payload.message_id, ev.payload.reactions);
         }
+    } else if (ev.type === "ROOM_REACTION_BROADCAST") {
+        updateMessageReactions(ev.payload.message_id, ev.payload.reactions);
+    } else if (ev.type === "ROOM_TYPING_BROADCAST") {
+        handleTypingIndicator(ev.payload);
     } else if (ev.type === "SYSTEM_EVENT") {
         if (currentRoom) {
-            // Already saved in DB on backend, so we could treat it as a room message,
-            // but the SYSTEM_EVENT packet might come before ROOM_HISTORY on refresh.
-            // Still safe to just append it.
             appendSystemMessage(UI.roomChatHistory, ev.payload.message);
+            fetchRoomMembers(); // Refresh members list on join/leave/kick
         }
     } else if (ev.type === "DISCONNECTED") {
         showToast(`Disconnected from ${ev.server}`, 'error');
