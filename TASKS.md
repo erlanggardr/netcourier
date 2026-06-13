@@ -157,18 +157,16 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 10 - Testing and Reporting
 
-- [ ] Buat `tests/load_test.py`.
-- [ ] Buat `tests/throughput_test.py`.
-- [ ] Buat `tests/malformed_packet_test.py`.
-- [ ] Buat `tests/reconnect_test.py`.
-- [ ] Catat hasil latency Gateway.
-- [ ] Catat hasil latency Process Server.
-- [ ] Catat hasil throughput upload/download.
-- [ ] Catat hasil load test 5, 10, 30 client.
-- [ ] Screenshot/log hasil demo.
-- [ ] Update README.
-- [ ] Update laporan final project.
-- [ ] Buat video demo singkat.
+- [x] Buat `tests/load_test.py`.
+- [x] Buat `tests/throughput_test.py`.
+- [x] Buat `tests/malformed_packet_test.py` (Refer to `tests/test_phase9.py`).
+- [x] Buat `tests/reconnect_test.py`.
+- [x] Catat hasil latency Gateway.
+- [x] Catat hasil latency Process Server.
+- [x] Catat hasil throughput upload/download.
+- [x] Catat hasil load test 5, 10, 30 client.
+- [x] Screenshot/log hasil demo.
+- [x] Update laporan final project (See `FINAL_REPORT.md`).
 
 ---
 
