@@ -4,7 +4,7 @@ import logging
 import argparse
 import time
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from common.constants import (
     DEFAULT_GATEWAY_HOST,
@@ -14,6 +14,33 @@ from common.constants import (
 from common.protocol import receive_packet, send_packet, build_packet, build_error_packet
 from common.logging_config import setup_logging
 from common.db import get_db_connection
+
+import os
+import re
+
+def sanitize_filename(filename):
+    """Sanitize filename to prevent path traversal and other attacks."""
+    # Keep only alphanumeric, dots, and underscores
+    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    # Remove leading dots or slashes
+    filename = filename.lstrip('./')
+    return filename
+
+class RateLimiter:
+    def __init__(self, limit_seconds=0.5):
+        self.limit_seconds = limit_seconds
+        # user_id -> last_message_time
+        self.last_action = {}
+        self.lock = threading.Lock()
+
+    def is_allowed(self, user_id):
+        with self.lock:
+            now = time.time()
+            last = self.last_action.get(user_id, 0)
+            if now - last < self.limit_seconds:
+                return False
+            self.last_action[user_id] = now
+            return True
 
 class ProcessServer:
     def __init__(self, server_id, host, port, gateway_host, gateway_port):
@@ -29,6 +56,9 @@ class ProcessServer:
         self.clients = {}
         # room_name -> set(client_sockets)
         self.rooms = {}
+        
+        # Phase 9: Rate limiting
+        self.chat_limiter = RateLimiter(limit_seconds=0.5)
         
         self.running = False
         self.gateway_sock = None
@@ -49,6 +79,9 @@ class ProcessServer:
         client_thread = threading.Thread(target=self._run_client_server, daemon=True)
         client_thread.start()
         
+        # Phase 9: Transfer timeout thread
+        threading.Thread(target=self._transfer_timeout_loop, daemon=True).start()
+        
         self.logger.info(f"Process Server {self.server_id} started on {self.host}:{self.port}")
         
         try:
@@ -62,6 +95,31 @@ class ProcessServer:
         self.running = False
         if self.gateway_sock:
             self.gateway_sock.close()
+
+    def _transfer_timeout_loop(self):
+        while self.running:
+            time.sleep(30) # Check every 30 seconds
+            self._check_transfer_timeouts()
+
+    def _check_transfer_timeouts(self, timeout_seconds=120): # 2 minutes
+        try:
+            with get_db_connection() as db_conn:
+                cursor = db_conn.cursor()
+                now = datetime.now()
+                timeout_threshold = (now - timedelta(seconds=timeout_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Mark stale transfers as failed
+                cursor.execute("""
+                    UPDATE file_transfers 
+                    SET status = 'failed' 
+                    WHERE status = 'in_progress' AND last_activity_at < ?
+                """, (timeout_threshold,))
+                
+                if cursor.rowcount > 0:
+                    self.logger.info(f"Marked {cursor.rowcount} stale transfers as failed.")
+                db_conn.commit()
+        except Exception as e:
+            self.logger.error(f"Error checking transfer timeouts: {e}")
 
     def _connect_to_gateway(self):
         try:
@@ -134,7 +192,13 @@ class ProcessServer:
         try:
             with conn:
                 while self.running:
-                    header, binary_payload = receive_packet(conn)
+                    try:
+                        header, binary_payload = receive_packet(conn)
+                    except ValueError as e:
+                        self.logger.warning(f"Malformed packet from {addr}: {e}")
+                        send_packet(conn, build_error_packet("INVALID_PACKET", message=str(e)))
+                        break
+
                     msg_type = header.get("type")
                     req_id = header.get("request_id")
                     token = header.get("token")
@@ -154,7 +218,12 @@ class ProcessServer:
                             send_packet(conn, build_error_packet("INVALID_TOKEN", request_id=req_id))
                             continue
                         
+                        user_id = self.clients[conn]["user_id"]
+                        
                         if msg_type == "ROOM_CHAT_SEND":
+                            if not self.chat_limiter.is_allowed(user_id):
+                                send_packet(conn, build_error_packet("RATE_LIMIT_EXCEEDED", request_id=req_id))
+                                continue
                             self._handle_room_chat_send(conn, req_id, payload)
                         elif msg_type == "ROOM_HISTORY_REQUEST":
                             self._handle_room_history_request(conn, req_id, payload)
@@ -474,11 +543,19 @@ class ProcessServer:
         if not all([room_id, filename, filesize, chunk_size, total_chunks, checksum]):
             send_packet(conn, build_error_packet("MISSING_FIELD", request_id=req_id))
             return
+
+        # Phase 9: File size limit (e.g., 100MB)
+        if filesize > 100 * 1024 * 1024:
+            send_packet(conn, build_error_packet("FILE_TOO_LARGE", message="Max file size is 100MB", request_id=req_id))
+            return
+
+        # Phase 9: Filename sanitization
+        filename = sanitize_filename(filename)
             
         try:
             with get_db_connection() as db_conn:
                 cursor = db_conn.cursor()
-                from datetime import datetime
+                from datetime import datetime, timedelta
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 import os
@@ -486,6 +563,7 @@ class ProcessServer:
                 from common.constants import PROJECT_ROOT
                 storage_dir = os.path.join(PROJECT_ROOT, "storage", self.server_id, str(room_id))
                 os.makedirs(storage_dir, exist_ok=True)
+                # Ensure stored filename is also safe
                 stored_filename = f"{int(datetime.now().timestamp())}_{filename}"
                 stored_path = os.path.join(storage_dir, stored_filename)
                 
@@ -540,8 +618,12 @@ class ProcessServer:
                 """, (transfer_id, chunk_index, len(binary_payload)))
                 
                 cursor.execute("""
-                    UPDATE file_transfers SET completed_chunks = completed_chunks + 1, bytes_transferred = bytes_transferred + ? WHERE transfer_id = ?
-                """, (len(binary_payload), transfer_id))
+                    UPDATE file_transfers 
+                    SET completed_chunks = completed_chunks + 1, 
+                        bytes_transferred = bytes_transferred + ?,
+                        last_activity_at = ?
+                    WHERE transfer_id = ?
+                """, (len(binary_payload), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), transfer_id))
                 db_conn.commit()
                 
                 send_packet(conn, build_packet("CHUNK_ACK", {
@@ -609,7 +691,7 @@ class ProcessServer:
                     send_packet(conn, build_error_packet("FILE_NOT_FOUND", request_id=req_id))
                     return
                 
-                from datetime import datetime
+                from datetime import datetime, timedelta
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute("""
                     INSERT INTO file_transfers (file_id, room_id, server_id, user_id, direction, status, total_chunks, started_at, last_activity_at)
@@ -726,8 +808,15 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--gateway-host", default=DEFAULT_GATEWAY_HOST)
     parser.add_argument("--gateway-port", type=int, default=DEFAULT_GATEWAY_BACKEND_PORT)
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     args = parser.parse_args()
+    
+    # The setup_logging function already handles component name, 
+    # but we can adjust the root logger or pass debug level if we want.
+    # For simplicity, if --debug is set, let's ensure the level is DEBUG.
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
     
     server = ProcessServer(args.server_id, args.host, args.port, args.gateway_host, args.gateway_port)
     server.start()

@@ -90,29 +90,50 @@ def receive_packet(sock: socket.socket) -> tuple[dict[str, Any], bytes]:
     Receive a length-prefixed packet from TCP.
     Returns (header_dict, binary_payload).
     """
-    # Read header length (4 bytes)
-    header_len_data = _recv_all(sock, HEADER_LENGTH_BYTES)
-    if not header_len_data:
-        raise ConnectionError("Socket closed while reading header length")
-    
-    header_len = struct.unpack(">I", header_len_data)[0]
-    
-    # Read JSON header
-    header_json_data = _recv_all(sock, header_len)
-    if not header_json_data:
-        raise ConnectionError("Socket closed while reading header JSON")
-    
-    header = json.loads(header_json_data.decode("utf-8"))
-    
-    # Read binary payload if any
-    payload_size = header.get("payload_size", 0)
-    payload = b""
-    if payload_size > 0:
-        payload = _recv_all(sock, payload_size)
-        if not payload:
-            raise ConnectionError("Socket closed while reading binary payload")
+    try:
+        # Read header length (4 bytes)
+        header_len_data = _recv_all(sock, HEADER_LENGTH_BYTES)
+        if not header_len_data:
+            raise ConnectionError("Socket closed while reading header length")
+        
+        header_len = struct.unpack(">I", header_len_data)[0]
+        
+        # Security: Sanity check for header length (e.g., max 64KB)
+        if header_len > 65535:
+            raise ValueError(f"Packet header too large: {header_len} bytes")
+        
+        # Read JSON header
+        header_json_data = _recv_all(sock, header_len)
+        if not header_json_data:
+            raise ConnectionError("Socket closed while reading header JSON")
+        
+        try:
+            header = json.loads(header_json_data.decode("utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON header: {e}")
             
-    return header, payload
+        if not isinstance(header, dict):
+            raise ValueError("Header must be a JSON object")
+            
+        # Read binary payload if any
+        payload_size = header.get("payload_size", 0)
+        
+        # Security: Sanity check for payload size (e.g., max 20MB for file chunks)
+        # 20MB = 20 * 1024 * 1024 = 20971520 bytes
+        if payload_size > 20971520:
+             raise ValueError(f"Packet payload too large: {payload_size} bytes")
+             
+        payload = b""
+        if payload_size > 0:
+            payload = _recv_all(sock, payload_size)
+            if not payload:
+                raise ConnectionError("Socket closed while reading binary payload")
+                
+        return header, payload
+        
+    except (struct.error, UnicodeDecodeError, ValueError) as e:
+        # Re-wrap as a specific protocol error or just propagate for higher-level handling
+        raise ValueError(f"Protocol violation: {e}")
 
 
 def _recv_all(sock: socket.socket, n: int) -> bytes:

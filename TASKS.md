@@ -142,16 +142,16 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 9 - Reliability and Security
 
-- [ ] Implement malformed packet handling.
-- [ ] Implement rate limiting chat.
-- [ ] Implement rate limiting PM.
-- [ ] Implement file size limit.
-- [ ] Implement filename sanitizer.
-- [ ] Implement timeout client.
-- [ ] Implement timeout transfer.
+- [x] Implement malformed packet handling.
+- [x] Implement rate limiting chat.
+- [x] Implement rate limiting PM.
+- [x] Implement file size limit.
+- [x] Implement filename sanitizer.
+- [x] Implement timeout client.
+- [x] Implement timeout transfer.
 - [ ] Implement token expiry optional.
-- [ ] Test malformed packet.
-- [ ] Test path traversal filename.
+- [x] Test malformed packet.
+- [x] Test path traversal filename.
 
 ---
 

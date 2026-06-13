@@ -5,6 +5,7 @@ import argparse
 import sys
 import uuid
 import hashlib
+import time
 from datetime import datetime
 
 from common.constants import (
@@ -22,6 +23,22 @@ from gateway.backend_service import BackendService
 from gateway.load_balancer import LoadBalancer
 from gateway.room_directory import RoomDirectoryService
 
+class RateLimiter:
+    def __init__(self, limit_seconds=1.0):
+        self.limit_seconds = limit_seconds
+        # user_id -> last_message_time
+        self.last_action = {}
+        self.lock = threading.Lock()
+
+    def is_allowed(self, user_id):
+        with self.lock:
+            now = time.time()
+            last = self.last_action.get(user_id, 0)
+            if now - last < self.limit_seconds:
+                return False
+            self.last_action[user_id] = now
+            return True
+
 class Gateway:
     def __init__(self, host, client_port, backend_port):
         self.host = host
@@ -36,6 +53,9 @@ class Gateway:
         self.backend_service = BackendService()
         self.load_balancer = LoadBalancer(self.backend_service)
         self.room_directory = RoomDirectoryService(self.load_balancer, self.backend_service)
+        
+        # Phase 9: Rate limiting
+        self.pm_limiter = RateLimiter(limit_seconds=1.0)
         
         # session_token -> {user_id, username, socket, last_seen}
         self.active_sessions = {}
@@ -58,6 +78,9 @@ class Gateway:
         backend_thread = threading.Thread(target=self._run_backend_server, daemon=True)
         backend_thread.start()
         
+        # Phase 9: Pruning thread
+        threading.Thread(target=self._prune_sessions_loop, daemon=True).start()
+        
         self.logger.info(f"Gateway started. Client port: {self.client_port}, Backend port: {self.backend_port}")
         
         try:
@@ -70,6 +93,23 @@ class Gateway:
         self.logger.info("Stopping Gateway...")
         self.running = False
         self.backend_service.stop()
+
+    def _prune_sessions_loop(self):
+        while self.running:
+            time.sleep(60) # Check every minute
+            self._prune_stale_sessions()
+
+    def _prune_stale_sessions(self, timeout_seconds=300): # 5 minutes
+        now = datetime.now()
+        tokens_to_remove = []
+        with self.lock:
+            for token, session in self.active_sessions.items():
+                if (now - session["last_seen"]).total_seconds() > timeout_seconds:
+                    tokens_to_remove.append(token)
+        
+        for token in tokens_to_remove:
+            self.logger.info(f"Pruning stale session: {token}")
+            self._cleanup_session(token)
 
     def _run_client_server(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -99,12 +139,23 @@ class Gateway:
         try:
             with conn:
                 while self.running:
-                    header, binary_payload = receive_packet(conn)
+                    try:
+                        header, binary_payload = receive_packet(conn)
+                    except ValueError as e:
+                        self.logger.warning(f"Malformed packet from {addr}: {e}")
+                        send_packet(conn, build_error_packet("INVALID_PACKET", message=str(e)))
+                        break # Close connection on protocol violation
+
                     msg_type = header.get("type")
                     req_id = header.get("request_id")
                     token = header.get("token")
                     json_payload = header.get("payload", {})
                     
+                    # Phase 9: Update last_seen
+                    if token and token in self.active_sessions:
+                        with self.lock:
+                            self.active_sessions[token]["last_seen"] = datetime.now()
+
                     self.logger.debug(f"Received {msg_type} from {addr}")
                     
                     if msg_type == "REGISTER":
@@ -130,6 +181,9 @@ class Gateway:
                         if msg_type == "LIST_ONLINE_USERS":
                             self._handle_list_online_users(conn, req_id)
                         elif msg_type == "PRIVATE_MESSAGE_SEND":
+                            if not self.pm_limiter.is_allowed(user_id):
+                                send_packet(conn, build_error_packet("RATE_LIMIT_EXCEEDED", request_id=req_id))
+                                continue
                             self._handle_private_message_send(conn, req_id, json_payload, user_id, username)
                         elif msg_type == "PM_HISTORY_REQUEST":
                             self._handle_pm_history_request(conn, req_id, json_payload, user_id)
