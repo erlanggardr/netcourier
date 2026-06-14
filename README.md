@@ -39,7 +39,7 @@ sequenceDiagram
     participant API as Web API Bridge
     participant GW as Gateway Server
     participant S1 as Process Server (S1)
-    database DB as SQLite Database
+    participant DB as SQLite Database
 
     %% Join Room & Location
     Note over Client, S1: 1. Alur Masuk Room (Join Room)
