@@ -28,7 +28,63 @@ flowchart TD
     S2 <-->|Control Channel / Heartbeat| G
 ```
 
-### 1.1 Komponen Utama
+### 1.1 Diagram Sekuensial (Sequence Diagram)
+
+Berikut adalah alur komunikasi sekuensial yang menggambarkan proses **Join Room** dilanjutkan dengan **Reliable Chunked File Upload**:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Browser Client
+    participant API as Web API Bridge
+    participant GW as Gateway Server
+    participant S1 as Process Server (S1)
+    database DB as SQLite Database
+
+    %% Join Room & Location
+    Note over Client, S1: 1. Alur Masuk Room (Join Room)
+    Client->>API: POST /api/rooms/join (room_name)
+    API->>GW: TCP: JOIN_ROOM
+    GW->>DB: Query room mapping & server status
+    DB-->>GW: Server S1 (127.0.0.1:9101)
+    GW-->>API: TCP: ROOM_LOCATION
+    API->>S1: Connect Socket & TCP: AUTH_BACKEND
+    S1-->>API: TCP: AUTH_BACKEND_OK
+    API->>S1: TCP: JOIN_ROOM_BACKEND
+    S1-->>API: TCP: JOIN_ROOM_OK
+    API-->>Client: 200 OK (success)
+
+    %% Chunked Upload
+    Note over Client, S1: 2. Alur Unggah Berkas Chunked (Reliable Chunked Upload)
+    Client->>Client: Hitung Checksum SHA-256 File
+    Client->>API: POST /api/rooms/files/upload?action=init (filesize, checksum)
+    API->>S1: TCP: UPLOAD_INIT
+    S1->>DB: Insert files & file_transfers record (status: in_progress)
+    DB-->>S1: success
+    S1-->>API: TCP: UPLOAD_READY (transfer_id)
+    API-->>Client: 200 OK (transfer_id)
+
+    loop Setiap Chunk 1MB - 16MB (Paralel 4 Workers)
+        Client->>API: POST /api/rooms/files/upload?action=chunk (transfer_id, index, body)
+        Note over API: Mengunci write_lock socket TCP
+        API->>S1: TCP: UPLOAD_CHUNK (index, binary data)
+        S1->>S1: Tulis data ke file handle cached pada disk
+        Note over S1: Setiap kelipatan 20 chunks
+        S1->>DB: Update completed_chunks & last_activity_at
+        S1-->>API: TCP: CHUNK_ACK (index, status)
+        API-->>Client: 200 OK
+    end
+
+    Client->>API: POST /api/rooms/files/upload?action=finish (transfer_id)
+    API->>S1: TCP: UPLOAD_FINISH
+    S1->>S1: Tutup cached file handle & Hitung SHA-256 berkas fisik
+    S1->>DB: Verifikasi Checksum & Update file status ke 'available'
+    DB-->>S1: success
+    S1-->>API: TCP: UPLOAD_SUCCESS
+    API-->>Client: 200 OK (success)
+```
+
+### 1.2 Komponen Utama
 1.  **Web Client (Browser UI):** Single Page Application modern (vanilla HTML/CSS/JS) dengan visual premium, progress bar upload real-time, emoji reaction panel, daftar pengguna online, dan panel kontrol moderasi room.
 2.  **Web API / HTTP Bridge (`web_api/server.py`):** Bertindak sebagai penerjemah (jembatan) yang mengubah request HTTP REST & event polling dari browser menjadi paket TCP socket biner untuk dikirim ke Gateway dan Process Server.
 3.  **Gateway Server (`gateway/main.py`):** Menangani pendaftaran pengguna, autentikasi (kata sandi terenkripsi PBKDF2), manajemen sesi global, presensi online, pencatatan room, perutean private message global, dan *load balancing* berbasis room affinity.
