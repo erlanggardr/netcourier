@@ -156,8 +156,14 @@ class UploadQueue {
             }
         }
 
-        const chunkSize = 1024 * 1024;
+        // Calculate dynamic chunk size to prevent port exhaustion (1MB to 16MB)
+        let chunkSize = 1024 * 1024;
+        if (item.file.size > 100 * 1024 * 1024) {
+            const mb = Math.ceil(item.file.size / (100 * 1024 * 1024));
+            chunkSize = Math.min(16, mb) * 1024 * 1024;
+        }
         const totalChunks = Math.ceil(item.file.size / chunkSize);
+
 
         if (!transferId) {
             const checksum = await this.calculateFileSHA256(item.file);

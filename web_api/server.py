@@ -483,7 +483,14 @@ class WebServer:
                 self.send_response(conn, 400, {"error": "Missing params"})
                 return
 
-            chunk_size = 1024 * 1024 # 1MB chunk size
+            # Calculate dynamic chunk size to prevent port exhaustion (1MB to 16MB)
+            chunk_size = 1024 * 1024
+            filesize = int(qs.get("filesize", 0))
+            if filesize > 100 * 1024 * 1024:
+                import math
+                mb = math.ceil(filesize / (100 * 1024 * 1024))
+                chunk_size = min(16, mb) * 1024 * 1024
+
 
             # 1. Chunked Upload Flow
             if action:

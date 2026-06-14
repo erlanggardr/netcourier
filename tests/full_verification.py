@@ -42,8 +42,15 @@ def run_full_test():
         return
 
     print("\n--- 2. Testing Room Join & Messaging ---")
+    # Try creating the room 'General' first, in case it's a clean database
+    send_packet(gw, {"type": "CREATE_ROOM", "token": token, "payload": {"room_name": "General", "description": "General room"}})
+    create_resp = receive_packet(gw)
+    
     send_packet(gw, {"type": "JOIN_ROOM", "token": token, "payload": {"room_name": "General"}})
     loc_resp = receive_packet(gw)
+    if loc_resp.get("type") == "ERROR":
+        print(f"[FAIL] Join room failed: {loc_resp}")
+        return
     loc = loc_resp["payload"]
     
     ps = socket.create_connection((host, loc["port"]), timeout=2)
