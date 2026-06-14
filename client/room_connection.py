@@ -17,6 +17,7 @@ class RoomConnection:
         
         self.pending_requests = {}
         self.lock = threading.Lock()
+        self.write_lock = threading.Lock()
 
     def connect(self):
         try:
@@ -54,7 +55,8 @@ class RoomConnection:
                 self.pending_requests[req_id] = callback
             
         try:
-            send_packet(self.sock, header)
+            with self.write_lock:
+                send_packet(self.sock, header)
             return True
         except Exception as e:
             self.logger.error(f"Error sending room request {msg_type}: {e}")

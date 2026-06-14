@@ -150,9 +150,9 @@ class WebServer:
                 return
 
             body = body_part
-            # Fast body reading with 64KB chunks
+            # Fast body reading with up to 1MB chunks to minimize recv calls and memory copies
             while len(body) < content_length:
-                chunk = conn.recv(65536)
+                chunk = conn.recv(min(1024 * 1024, content_length - len(body)))
                 if not chunk:
                     break
                 body += chunk
@@ -534,7 +534,8 @@ class WebServer:
                         session.room_conn.pending_requests[packet["request_id"]] = cb
                     
                     try:
-                        session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + raw_body)
+                        with session.room_conn.write_lock:
+                            session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + raw_body)
                     except Exception as e:
                         self.send_response(conn, 500, {"error": f"Socket send error: {e}"})
                         return
