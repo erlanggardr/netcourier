@@ -176,6 +176,6 @@ Gunakan checklist ini sebagai roadmap implementasi.
 - [x] Emoji/reaction.
 - [x] Admin kick user.
 - [x] Admin delete file.
-- [ ] Transfer queue.
+- [x] Transfer queue.
 - [ ] Web dashboard monitoring sederhana.
 - [ ] Docker compose untuk Gateway + S1 + S2 + DB.

@@ -6,6 +6,125 @@ let currentRoomData = null;
 let currentPmUser = null;
 let isRegistering = false;
 
+// --- Upload Queue Manager ---
+class UploadQueue {
+    constructor(maxConcurrent = 2) {
+        this.queue = [];
+        this.activeCount = 0;
+        this.maxConcurrent = maxConcurrent;
+        this.transfers = new Map(); // id -> { file, progress, status }
+        this.container = null;
+    }
+
+    initUI() {
+        this.container = document.getElementById('upload-queue-container');
+    }
+
+    add(file, roomName) {
+        const id = Math.random().toString(36).substr(2, 9);
+        const item = { id, file, roomName, progress: 0, status: 'queued' };
+        this.queue.push(item);
+        this.transfers.set(id, item);
+        this.render();
+        this.process();
+    }
+
+    async process() {
+        if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) return;
+
+        const item = this.queue.shift();
+        item.status = 'uploading';
+        this.activeCount++;
+        this.render();
+
+        try {
+            await this.uploadFile(item);
+            item.status = 'completed';
+            item.progress = 100;
+        } catch (err) {
+            item.status = 'failed';
+            showToast(`Upload failed for ${item.file.name}: ${err.message}`, 'error');
+        } finally {
+            this.activeCount--;
+            this.render();
+            // Automatically remove completed/failed after 5s
+            setTimeout(() => {
+                this.transfers.delete(item.id);
+                this.render();
+            }, 5000);
+            this.process();
+        }
+    }
+
+    uploadFile(item) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const url = `/api/rooms/files/upload?room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}`;
+            
+            xhr.open('POST', url, true);
+            xhr.setRequestHeader('Session-Id', sessionId);
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    item.progress = Math.round((e.loaded / e.total) * 100);
+                    this.render();
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(JSON.parse(xhr.responseText));
+                } else {
+                    reject(new Error(xhr.statusText));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send(item.file);
+        });
+    }
+
+    render() {
+        if (!this.container) return;
+        if (this.transfers.size === 0) {
+            this.container.classList.add('hidden');
+            return;
+        }
+        this.container.classList.remove('hidden');
+
+        this.container.innerHTML = '<h5 class="text-[10px] uppercase font-bold text-gray-500 mb-2 px-1">File Transfers</h5>';
+        this.transfers.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'bg-black/40 p-2 rounded mb-1 text-xs border border-gray-800/50';
+            
+            const statusColors = {
+                queued: 'text-gray-500',
+                uploading: 'text-primary',
+                completed: 'text-green-500',
+                failed: 'text-red-500'
+            };
+
+            div.innerHTML = `
+                <div class="flex justify-between mb-1 truncate">
+                    <span class="truncate pr-2 font-medium">${item.file.name}</span>
+                    <span class="${statusColors[item.status]} uppercase font-bold text-[9px]">${item.status}</span>
+                </div>
+                <div class="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                    <div class="h-full bg-primary transition-all duration-300" style="width: ${item.progress}%"></div>
+                </div>
+                <div class="flex justify-between mt-1 text-[10px] text-gray-500">
+                    <span>${formatBytes(item.file.size)}</span>
+                    <span>${item.progress}%</span>
+                </div>
+            `;
+            this.container.appendChild(div);
+        });
+    }
+}
+
+const uploadQueue = new UploadQueue();
+
 // Global Error Handler
 window.onerror = function(msg, url, line, col, error) {
     showToast(`JS Error: ${msg}`, 'error');
@@ -69,6 +188,7 @@ function showView(viewName) {
 
 // Check session on load
 window.addEventListener('DOMContentLoaded', () => {
+    uploadQueue.initUI();
     if (sessionId && currentUser) {
         UI.navUsername.textContent = currentUser.display_name;
         if (currentRoom) {
@@ -403,27 +523,11 @@ document.getElementById('chat-file-input').addEventListener('change', async (e) 
     if (!currentRoom) return;
     if (e.target.files.length === 0) return;
     
-    const file = e.target.files[0];
-    e.target.value = '';
+    Array.from(e.target.files).forEach(file => {
+        uploadQueue.add(file, currentRoom);
+    });
     
-    showToast(`Uploading ${file.name}...`);
-    try {
-        const buffer = await file.arrayBuffer();
-        const headers = {
-            'Session-Id': sessionId,
-            'Content-Type': 'application/octet-stream'
-        };
-        const res = await fetch(`/api/rooms/files/upload?room_name=${encodeURIComponent(currentRoom)}&filename=${encodeURIComponent(file.name)}`, {
-            method: 'POST',
-            headers,
-            body: buffer
-        });
-        
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Upload failed');
-    } catch(err) {
-        showToast(err.message, 'error');
-    }
+    e.target.value = '';
 });
 
 // --- Room Files Flow ---
@@ -442,11 +546,11 @@ document.getElementById('btn-room-files').addEventListener('click', async () => 
             const div = document.createElement('div');
             div.className = 'flex justify-between items-center p-2 hover:bg-gray-800 rounded transition-colors';
             div.innerHTML = `
-                <div class="flex flex-col truncate pr-2">
+                <div class="flex flex-col pr-2 min-w-0">
                     <span class="text-sm font-medium truncate">${f.original_filename}</span>
                     <span class="text-xs text-gray-500">${formatBytes(f.size_bytes)} • by ${f.uploader_username}</span>
                 </div>
-                <button class="bg-secondary hover:bg-primary text-xs px-3 py-1 rounded transition-colors" onclick="downloadFile(${f.file_id}, '${f.original_filename.replace(/'/g, "\\'")}')">Download</button>
+                <button class="bg-secondary hover:bg-primary text-xs px-3 py-1 rounded transition-colors flex-shrink-0" onclick="downloadFile(${f.file_id}, '${f.original_filename.replace(/'/g, "\\'")}')">Download</button>
             `;
             UI.listRoomFiles.appendChild(div);
         });
@@ -457,50 +561,20 @@ document.getElementById('btn-close-files').addEventListener('click', () => {
     UI.modalRoomFiles.classList.add('hidden');
 });
 
-document.getElementById('form-upload-file').addEventListener('submit', async (e) => {
+document.getElementById('form-upload-file').addEventListener('submit', (e) => {
     e.preventDefault();
     if (!currentRoom) return;
     
     const fileInput = document.getElementById('file-input');
     if (fileInput.files.length === 0) return;
     
-    const file = fileInput.files[0];
-    const btnSubmit = e.target.querySelector('button[type="submit"]');
+    Array.from(fileInput.files).forEach(file => {
+        uploadQueue.add(file, currentRoom);
+    });
     
-    try {
-        btnSubmit.textContent = 'Uploading...';
-        btnSubmit.disabled = true;
-        btnSubmit.classList.add('opacity-50');
-        
-        // We will read the file as an array buffer and send it as raw binary body
-        const buffer = await file.arrayBuffer();
-        
-        // Use standard fetch directly to send raw ArrayBuffer easily
-        const headers = {
-            'Session-Id': sessionId,
-            'Content-Type': 'application/octet-stream' // doesn't matter much to our custom server
-        };
-        const res = await fetch(`/api/rooms/files/upload?room_name=${encodeURIComponent(currentRoom)}&filename=${encodeURIComponent(file.name)}`, {
-            method: 'POST',
-            headers,
-            body: buffer
-        });
-        
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Upload failed');
-        
-        showToast('File uploaded successfully!', 'success');
-        fileInput.value = '';
-        
-        // Refresh list
-        document.getElementById('btn-room-files').click();
-    } catch(e) {
-        showToast(e.message, 'error');
-    } finally {
-        btnSubmit.textContent = 'Upload';
-        btnSubmit.disabled = false;
-        btnSubmit.classList.remove('opacity-50');
-    }
+    fileInput.value = '';
+    // Optional: close modal or just show progress in sidebar
+    showToast('Files added to queue!', 'success');
 });
 
 window.downloadFile = async function(fileId, filename) {

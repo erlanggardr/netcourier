@@ -118,6 +118,11 @@
                 <div id="room-members-list" class="flex-1 overflow-y-auto p-2 space-y-1">
                     <!-- Members listed here -->
                 </div>
+
+                <!-- Upload Queue Container -->
+                <div id="upload-queue-container" class="border-t border-gray-800 p-3 hidden max-h-[300px] overflow-y-auto bg-darker/30">
+                    <!-- Queue items will be injected here via JS -->
+                </div>
             </div>
 
             <!-- Main Chat -->
@@ -156,7 +161,7 @@
                         </button>
                     </form>
                     <!-- Hidden file input for attachment -->
-                    <input type="file" id="chat-file-input" class="hidden">
+                    <input type="file" id="chat-file-input" class="hidden" multiple>
                 </div>
             </div>
         </div>
@@ -191,7 +196,7 @@
                 </div>
                 <div class="shrink-0 pt-4 border-t border-gray-800">
                     <form id="form-upload-file" class="flex gap-2 items-center">
-                        <input type="file" id="file-input" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-gray-800 file:text-gray-200 hover:file:bg-gray-700" required>
+                        <input type="file" id="file-input" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-gray-800 file:text-gray-200 hover:file:bg-gray-700" multiple required>
                         <button type="submit" class="bg-primary hover:bg-secondary text-sm px-4 py-2 rounded transition-colors whitespace-nowrap">Upload</button>
                     </form>
                 </div>
