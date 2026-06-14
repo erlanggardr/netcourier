@@ -1,229 +1,125 @@
 # NetCourier
 
-**NetCourier** adalah aplikasi **Multi-Chat Room berbasis TCP Socket** dengan fitur unggulan **Reliable File Transfer**. Project ini dibuat untuk final project Pemrograman Jaringan.
+**NetCourier** adalah aplikasi **Multi-Chat Room terdistribusi berbasis TCP Socket** dengan fitur unggulan **Reliable File Transfer berkinerja tinggi** dan **HTTP-to-TCP API Bridge** untuk antarmuka web.
 
-NetCourier memenuhi kategori **Aplikasi Multi-Chat Rooms** dengan fitur wajib:
-- authentication sederhana,
-- banyak room,
-- satu room banyak client,
-- create room,
-- join room,
-- leave room,
-- broadcast message,
-- private message,
-- online user list,
-- room list,
-- chat history,
-- timestamp message,
-- server logging,
-- TCP socket,
-- multithreading/select,
-- serialization.
-
-Fitur pembeda NetCourier:
-- private message global melalui Gateway,
-- room chat dan file transfer melalui Process Server,
-- file transfer dengan chunking,
-- checksum SHA-256,
-- progress upload/download,
-- resume transfer,
-- load balancing berbasis room affinity,
-- latency dan throughput measurement,
-- load testing.
+Aplikasi ini memadukan kekuatan pemrograman jaringan tingkat rendah (raw TCP socket, thread-safe write locks, custom application protocol) dengan kemudahan akses antarmuka modern (Single Page Web UI berbasis HTML/JS).
 
 ---
 
-## 1. Konsep Singkat
+## 1. Arsitektur Sistem
 
-NetCourier memisahkan komunikasi menjadi dua jenis:
+NetCourier menggunakan arsitektur terdistribusi yang memisahkan tanggung jawab autentikasi dan koordinasi global dengan manajemen ruang obrolan (*room chat*) dan transfer file.
 
-1. **Global communication**
-   - Ditangani oleh Gateway.
-   - Berisi login, register, online user list, private message, PM history, room directory, dan load balancing.
+```mermaid
+flowchart TD
+    Browser[Web Browser Client] <-->|HTTP REST & Long-polling| Bridge[Web API Bridge / client/main.py]
+    Bridge <-->|TCP Socket A: Auth, PM, Room Directory| G[Gateway / Auth / Load Balancer]
+    Bridge <-->|TCP Socket B: Room Chat, File Transfer| S1[Process Server S1]
+    Bridge <-->|TCP Socket B: Room Chat, File Transfer| S2[Process Server S2]
 
-2. **Room communication**
-   - Ditangani oleh Process Server.
-   - Berisi room chat, broadcast message, room history, file upload, file download, chunking, checksum, dan resume transfer.
+    G <-->|SQL| DB[(Central Database SQLite)]
+    S1 <-->|SQL| DB
+    S2 <-->|SQL| DB
 
-Client dapat tetap menerima private message walaupun sedang berada di dalam room, karena client menjaga koneksi ke Gateway selama aplikasi berjalan.
+    S1 --> FS1[(Storage S1)]
+    S2 --> FS2[(Storage S2)]
 
-UI utama NetCourier menggunakan **Web-based UI** (Single Page HTML/JS) yang dihubungkan ke server TCP via **HTTP & JSON API Bridge** di `web_api/server.py`. Pengguna mengakses aplikasi dengan membuka browser ke server HTTP lokal.
+    S1 <-->|Control Channel / Heartbeat| G
+    S2 <-->|Control Channel / Heartbeat| G
+```
+
+### 1.1 Komponen Utama
+1.  **Web Client (Browser UI):** Single Page Application modern (vanilla HTML/CSS/JS) dengan visual premium, progress bar upload real-time, emoji reaction panel, daftar pengguna online, dan panel kontrol moderasi room.
+2.  **Web API / HTTP Bridge (`web_api/server.py`):** Bertindak sebagai penerjemah (jembatan) yang mengubah request HTTP REST & event polling dari browser menjadi paket TCP socket biner untuk dikirim ke Gateway dan Process Server.
+3.  **Gateway Server (`gateway/main.py`):** Menangani pendaftaran pengguna, autentikasi (kata sandi terenkripsi PBKDF2), manajemen sesi global, presensi online, pencatatan room, perutean private message global, dan *load balancing* berbasis room affinity.
+4.  **Process Server (`server/main.py`):** Menangani aktivitas room chat (siaran obrolan, riwayat chat, typing indicator, emoji reaction), dan manajemen file transfer (chunking, checksum, pause/resume, delete file).
+5.  **Central Database (SQLite):** Menyimpan persistent data seperti kredensial user, daftar room, riwayat obrolan/PM, daftar file, serta transaksi status transfer berkas.
 
 ---
 
-## 2. Arsitektur Ringkas
+## 2. Desain Protokol Aplikasi (Custom Application Layer)
+
+Komunikasi antara client, gateway, dan process server berjalan di atas TCP socket dengan protokol biner khusus (*custom application layer protocol*) dengan struktur packet framing berikut:
 
 ```txt
-Web Client (Browser)
-   |
-   | HTTP REST / JSON API & SSE / Long-Polling
-   v
-Web API Server / HTTP Bridge (client/main.py)
-   |
-   +--- TCP Socket A: login, PM, online user, room directory ---> Gateway
-   |
-   +--- TCP Socket B: room chat, file transfer -----------------> Process Server (S1/S2)
++-----------------------+------------------------------------------+-----------------------+
+|  Length Prefix (4B)   |               JSON Header                |    Binary Payload     |
+|  (Int32 Big-Endian)   |           (UTF-8 encoded JSON)           |  (Raw Bytes, Opsional)|
++-----------------------+------------------------------------------+-----------------------+
+```
+
+*   **Length Prefix:** Integer 32-bit big-endian yang mendefinisikan panjang JSON Header.
+*   **JSON Header:** String JSON terenkode UTF-8 yang berisi metadata paket, seperti `type` pesan, `request_id`, `token` autentikasi, dan `payload_size` data biner.
+*   **Binary Payload:** Berisi byte mentah data berkas (hanya ada pada saat pengiriman potongan file / chunks).
+
+### Contoh JSON Header:
+```json
+{
+  "type": "ROOM_CHAT_SEND",
+  "request_id": "REQ-000142",
+  "token": "053e7da0-1f38-43dd-94ca-d6eb520d10b5",
+  "payload_size": 0,
+  "payload": {
+    "room_name": "General",
+    "message": "Halo semuanya!"
+  }
+}
 ```
 
 ---
 
-## 3. Komponen Utama
+## 3. Fitur Unggulan
 
-| Komponen | Tugas |
-|---|---|
-| Web Client (Browser) | Web UI user, login, PM, join room, room chat, upload/download file |
-| Web API / HTTP Bridge | Jembatan penerjemah request HTTP/JSON ke koneksi TCP socket Gateway & Process Server |
-| Gateway | Auth, session, PM global, online user, room directory, load balancing |
-| Process Server | Room chat, broadcast, file transfer, chunking, checksum, resume |
-| Central Database | Users, sessions, rooms, chat history, PM history, file metadata, logs |
-| File Storage | Menyimpan file fisik per server/room |
+### 3.1 Load Balancing & Room Affinity
+Saat pengguna membuat room baru (`CREATE_ROOM`), Gateway menugaskan room tersebut ke **Process Server** yang memiliki beban paling rendah (berdasarkan kalkulasi heartbeat skor CPU/koneksi aktif). 
+Sekali room ditugaskan ke sebuah server (misal S1), room tersebut akan terikat secara permanen (*room affinity*). Gateway akan merujuk semua pengguna yang ingin bergabung ke room tersebut ke server S1.
 
----
+### 3.2 High-Performance Reliable File Transfer (113+ MB/s)
+*   **Dynamic Chunk Size:** Chunk size dihitung secara dinamis (antara 1MB hingga 16MB) berdasarkan ukuran file. Untuk file besar seperti **1GB**, sistem menggunakan chunk 11MB sehingga hanya memerlukan 94 request HTTP. Hal ini mencegah TCP port exhaustion di sistem operasi lokal.
+*   **File Handle Caching:** Open file handles disimpan di memori selama transfer chunk berjalan, mengeliminasi I/O disk overhead dari pembukaan/penutupan file per-chunk.
+*   **Thread-Safe Write Locks:** Koneksi socket TCP dilindungi oleh locks agar pengiriman chunk paralel dari beberapa thread HTTP Web API ke Process Server tidak mengalami korupsi byte stream.
+*   **Keutuhan Berkas (Checksum):** Setiap file diverifikasi menggunakan **SHA-256 Checksum** setelah upload selesai.
 
-## 4. Tech Stack
+### 3.3 Resume Transfer (Unggah/Unduh)
+Jika koneksi internet terputus di tengah proses transfer file, pengguna dapat melakukan klik **Resume**. Client akan meminta status chunk terakhir yang sukses ditulis ke Process Server melalui pesan `RESUME_TRANSFER`, lalu melanjutkan pengunggahan dari index chunk tersebut.
 
-| Bagian | Teknologi |
-|---|---|
-| Bahasa | Python |
-| Networking | `socket` |
-| Concurrency | `threading` atau `select` |
-| Serialization | JSON |
-| Packet framing | Length-prefixed TCP frame |
-| Database | PostgreSQL direkomendasikan, SQLite boleh untuk demo lokal |
-| Password hashing | `hashlib.pbkdf2_hmac` atau `bcrypt` jika tersedia |
-| Checksum file | SHA-256 |
-| Logging | Python `logging` |
-| UI | Web-based HTML/CSS/JS (SPA) |
-| UI modules | Vanilla HTML/CSS/JS, Web API Server HTTP, long-polling /api/events |
+### 3.4 Moderasi & Interaksi Interaktif
+*   **Emoji Reactions:** Pengguna dapat memberikan reaksi emoji secara real-time pada chat bubble pesan.
+*   **Typing Indicator:** Memberikan efek visual "[User] sedang mengetik..." di room obrolan.
+*   **Kick User:** Pembuat room (*room owner*) memiliki wewenang administratif untuk mendepak anggota room secara paksa dari panel member.
 
 ---
 
-## 5. Struktur Folder Rekomendasi
+## 4. Cara Menjalankan Versi Demo Lokal
 
-```txt
-netcourier/
-├── gateway/
-│   ├── main.py
-│   ├── auth_service.py
-│   ├── pm_service.py
-│   ├── room_directory.py
-│   ├── load_balancer.py
-│   └── presence_service.py
-│
-├── server/
-│   ├── server.py
-│   ├── client_handler.py
-│   ├── room_service.py
-│   ├── chat_service.py
-│   ├── file_transfer_service.py
-│   ├── transfer_state.py
-│   └── storage_service.py
-│
-├── client/
-│   ├── main.py (Web API & UI Server launcher)
-│   ├── gateway_connection.py (Gateway socket helper)
-│   └── room_connection.py (Room server socket helper)
-├── web_ui/
-│   ├── index.html
-│   └── app.js
-├── web_api/
-│   └── server.py (Custom HTTP Server / TCP Bridge)
-│
-├── common/
-│   ├── protocol.py
-│   ├── packet.py
-│   ├── constants.py
-│   ├── errors.py
-│   └── utils.py
-│
-├── data/
-│   └── netcourier.db
-│
-├── storage/
-│   ├── S1/
-│   └── S2/
-│
-├── tests/
-│   ├── load_test.py
-│   ├── malformed_packet_test.py
-│   ├── reconnect_test.py
-│   └── throughput_test.py
-│
-├── docs/
-│   ├── REQUIREMENTS.md
-│   ├── FEATURE_SPEC.md
-│   ├── ARCHITECTURE.md
-│   ├── API_SPEC.md
-│   ├── DATABASE.md
-│   ├── UI_UX.md
-│   ├── TESTING.md
-│   ├── SECURITY.md
-│   ├── DEPLOYMENT.md
-│   └── GLOSSARY.md
-│
-├── ai/
-│   └── AI_CONTEXT.md
-│
-├── TASKS.md
-├── CHANGELOG.md
-└── README.md
-```
+Sebelum memulai, pastikan Anda berada di direktori root project `netcourier`. Jalankan perintah-perintah berikut di terminal terpisah:
 
----
-
-## 6. Cara Menjalankan Versi Demo Lokal
-
-### Terminal 1: Gateway
-
+### Terminal 1: Gateway Server
 ```bash
-python gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
+python -m gateway.main
 ```
+Gateway akan meluncurkan database SQLite secara otomatis jika file `data/netcourier.db` belum ada.
 
 ### Terminal 2: Process Server S1
-
 ```bash
-python server/main.py --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
+python -m server.main --server-id S1 --port 9101
 ```
 
-### Terminal 3: Process Server S2
-
+### Terminal 3: Process Server S2 (Opsional)
 ```bash
-python server/main.py --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
+python -m server.main --server-id S2 --port 9102
 ```
 
-### Terminal 4 dst: Client (Web Server)
-
+### Terminal 4: Web Client & API Server
 ```bash
-python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000 --port 8080
+python -m client.main
 ```
-Akses Web UI di browser Anda melalui tautan `http://localhost:8080`.
+Akses antarmuka aplikasi melalui peramban (browser) di alamat **http://localhost:8080**.
 
 ---
 
-## 7. Prioritas Implementasi
+## 5. Panduan Pengguna & Tangkapan Layar Fitur
 
-1. TCP protocol dan packet framing.
-2. Gateway: register, login, session token.
-3. Gateway: online user dan PM global.
-4. Gateway: backend registry dan heartbeat.
-5. Gateway: room directory dan room affinity.
-6. Process Server: room chat.
-7. Process Server: file transfer.
-8. Reliable transfer: chunking, checksum, resume.
-9. Web UI integration and HTTP-to-TCP API bridge.
-10. Testing: latency, throughput, load test.
-11. Dokumentasi dan video demo.
+Untuk penjelasan detail setiap fitur program lengkap dengan panduan penggunaan visual dan bukti screenshot (Autentikasi, Chat Room, Reaksi Emoji, Transfer File Besar 1GB, Kecepatan, Moderasi Kick, dll.), silakan buka dokumentasi:
 
----
-
-## 8. Dokumentasi Penting
-
-Baca berurutan:
-1. `ai/AI_CONTEXT.md`
-2. `docs/REQUIREMENTS.md`
-3. `docs/FEATURE_SPEC.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/API_SPEC.md`
-6. `docs/DATABASE.md`
-7. `docs/TESTING.md`
-8. `TASKS.md`
+👉 **[PROGRAM_GUIDE.md](PROGRAM_GUIDE.md)**
