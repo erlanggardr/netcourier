@@ -6,6 +6,54 @@ Semua pengujian visual dilakukan menggunakan antarmuka berbasis web (**Web-based
 
 ---
 
+## Struktur Komponen & Peran Sistem (Architecture Roles)
+
+Aplikasi NetCourier dibagi menjadi beberapa komponen utama yang memiliki peran dan tanggung jawab spesifik dalam menangani alur web dan backend:
+
+### 1. Web Client (Frontend / Browser UI)
+*   **Peran:** Menyajikan antarmuka visual kepada pengguna dan menangani interaksi langsung (click events, form submissions, file selection, XHR slicing).
+*   **Komponen File:**
+    *   [web_ui/index.html](file:///d:/Project/netcourier/web_ui/index.html): Kerangka tampilan Single Page Application (SPA), modal chat, transfer list, dan reaction panels.
+    *   [web_ui/app.js](file:///d:/Project/netcourier/web_ui/app.js): Logika pengontrol UI (event listeners, dynamic rendering, file slicing/upload loop, polling `/api/events` menggunakan Server-Sent Events / Long-polling).
+*   **Cara Kerja:**
+    *   Berjalan di peramban web client.
+    *   Mengirim request HTTP REST ke Web API Server.
+    *   Menerima broadcast real-time (pesan baru, reaksi emoji, status mengetik) dari event stream HTTP.
+
+### 2. Web API Server (HTTP-to-TCP Bridge)
+*   **Peran:** Bertindak sebagai jembatan penerjemah yang mengubah panggilan REST API (HTTP) dari browser menjadi paket protokol TCP biner, serta meneruskan respon TCP server kembali ke browser.
+*   **Komponen File:**
+    *   [web_api/server.py](file:///d:/Project/netcourier/web_api/server.py): Server HTTP kustom berkinerja tinggi yang menangani REST routing, manajemen sesi `WebSession` yang melacak socket TCP persisten, dan pengiriman event streaming.
+    *   [client/main.py](file:///d:/Project/netcourier/client/main.py): Entry point (launcher) untuk memulai server Web API di port 8080.
+*   **Cara Kerja:**
+    *   Menerima HTTP Request -> Mencari `WebSession` aktif -> Mengambil raw socket -> Mengirim paket TCP biner terbingkai length-prefixed.
+    *   Melacak koneksi persistent Gateway (`session.gateway_conn`) dan Process Server (`session.room_conn`).
+    *   Menggunakan thread-safe `write_lock` pada socket TCP untuk mencegah korupsi data stream selama unggahan potongan biner (chunks) paralel.
+
+### 3. Gateway Server (Auth & Global Directory)
+*   **Peran:** Mengkoordinasikan status sistem secara global (autentikasi, sesi aktif, perutean pesan privat/PM, pembuatan room, dan beban kerja server).
+*   **Komponen File:**
+    *   [gateway/main.py](file:///d:/Project/netcourier/gateway/main.py): Server utama yang membuka socket client-facing (port 9000) dan backend-facing (port 9001).
+    *   [gateway/auth_service.py](file:///d:/Project/netcourier/gateway/auth_service.py): Melakukan pendaftaran dan verifikasi login menggunakan enkripsi PBKDF2.
+    *   [gateway/presence_service.py](file:///d:/Project/netcourier/gateway/presence_service.py): Mencatat status user (online/offline) di database SQLite.
+    *   [gateway/load_balancer.py](file:///d:/Project/netcourier/gateway/load_balancer.py): Memilih server pemroses dengan beban paling rendah saat room dibuat.
+*   **Cara Kerja:**
+    *   Berjalan sebagai server TCP socket mandiri.
+    *   Menerima pendaftaran detak jantung (*heartbeat*) Process Server dan melacak ketersediaan mereka.
+    *   Mengatur perutean data global terpusat.
+
+### 4. Process Server (Chat Room & File Transfer)
+*   **Peran:** Menangani semua fungsionalitas obrolan di dalam room chat dan proses transfer berkas (upload/download).
+*   **Komponen File:**
+    *   [server/main.py](file:///d:/Project/netcourier/server/main.py): Server room mandiri yang menangani multi-klien via threads/socket select, broadcast chat room, indikator mengetik, reaksi emoji, dan chunked upload/download.
+*   **Cara Kerja:**
+    *   Menghubungkan socket client yang sudah terautentikasi (melalui koordinasi room location dari Gateway).
+    *   Menyimpan progress upload biner (`self.transfer_progress`) di memori dan menyimpannya secara bertahap ke SQLite DB.
+    *   Menyimpan file fisik biner langsung ke folder penyimpanan lokal per-room ([storage/S1/](file:///d:/Project/netcourier/storage/S1) atau [storage/S2/](file:///d:/Project/netcourier/storage/S2)).
+
+---
+
+
 ## 1. Fitur Autentikasi (Registrasi & Login)
 
 NetCourier menyediakan mekanisme pendaftaran akun baru secara langsung dan login dengan perlindungan kata sandi menggunakan hashing aman PBKDF2 di sisi Gateway.
