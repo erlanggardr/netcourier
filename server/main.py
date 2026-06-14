@@ -848,10 +848,13 @@ class ProcessServer:
                 import os
                 import hashlib
                 from common.constants import PROJECT_ROOT
+                import uuid
                 storage_dir = os.path.join(PROJECT_ROOT, "storage", self.server_id, str(room_id))
                 os.makedirs(storage_dir, exist_ok=True)
-                # Ensure stored filename is also safe
-                stored_filename = f"{int(datetime.now().timestamp())}_{filename}"
+                
+                # Use UUID for disk filename to prevent collisions (Phase 10 fix)
+                unique_id = str(uuid.uuid4())
+                stored_filename = f"{unique_id}_{filename}"
                 stored_path = os.path.join(storage_dir, stored_filename)
                 
                 # Touch the file to ensure it exists for seek/out-of-order writes

@@ -1,147 +1,149 @@
 import socket
-import time
+import json
 import os
 import hashlib
-import argparse
-import json
-import struct
-from common.protocol import send_packet, receive_packet, build_packet
-from common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
+import time
+import sys
+from common.protocol import send_packet, receive_packet
+from common.constants import MESSAGE_TYPES
 
-class ThroughputClient:
-    def __init__(self, username, password):
-        self.username = username
-        self.password = password
-        self.token = None
-        self.gate_sock = None
-        self.room_sock = None
-        self.room_id = None
-        self.room_name = None
+GATEWAY_HOST = "127.0.0.1"
+GATEWAY_PORT = 9000
+TEST_FILE = "tests/uploadbinarytest/test_1gb.bin"
+DOWNLOAD_DIR = "tests/download_temp"
 
-    def receive_until(self, sock, expected_type):
-        while True:
-            header, payload = receive_packet(sock)
-            if header["type"] == expected_type:
-                return header, payload
-            if header["type"] == "ERROR":
-                return header, payload
-            # Ignore or log others (like SYSTEM_EVENT)
-            # print(f"[*] Skipping {header['type']} while waiting for {expected_type}")
+def get_checksum(file_path):
+    hash_sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_sha256.update(chunk)
+    return hash_sha256.hexdigest()
 
-    def connect_and_login(self):
-        self.gate_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.gate_sock.connect((DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT))
+def run_throughput_benchmark():
+    if not os.path.exists(TEST_FILE):
+        print(f"Error: {TEST_FILE} not found.")
+        return
+    
+    file_size = os.path.getsize(TEST_FILE)
+    file_name = os.path.basename(TEST_FILE)
+    print(f"--- Starting 1GB Throughput Benchmark ---")
+    print(f"File: {file_name} ({file_size / (1024**3):.2f} GB)")
+
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client.connect((GATEWAY_HOST, GATEWAY_PORT))
         
-        # Register if needed, then login
-        send_packet(self.gate_sock, build_packet("REGISTER", {"username": self.username, "password": self.password}))
-        receive_packet(self.gate_sock)
+        # 1. Auth
+        send_packet(client, {"type": MESSAGE_TYPES["LOGIN"], "payload": {"username": "tester", "password": "password"}})
+        h, _ = receive_packet(client)
+        token = h.get("token") or h.get("payload", {}).get("token")
         
-        send_packet(self.gate_sock, build_packet("LOGIN", {"username": self.username, "password": self.password}))
-        header, _ = self.receive_until(self.gate_sock, "LOGIN_OK")
-        if header["type"] == "LOGIN_OK":
-            self.token = header["token"]
-            return True
-        return False
+        # 2. Join Room
+        send_packet(client, {"type": MESSAGE_TYPES["JOIN_ROOM"], "token": token, "payload": {"room_name": "General"}})
+        h, _ = receive_packet(client)
+        if h.get("type") == "ERROR":
+            # Try Lobby if General not found
+            send_packet(client, {"type": MESSAGE_TYPES["JOIN_ROOM"], "token": token, "payload": {"room_name": "Lobby"}})
+            h, _ = receive_packet(client)
+            
+        room_payload = h["payload"]
+        # client.close()  # <--- DO NOT CLOSE
 
-    def create_and_join_room(self, name):
-        self.room_name = name
-        send_packet(self.gate_sock, build_packet("CREATE_ROOM", {"room_name": name}, token=self.token))
-        header, _ = receive_packet(self.gate_sock)
-        if header["type"] == "ERROR": # Maybe exists
-            send_packet(self.gate_sock, build_packet("JOIN_ROOM", {"room_name": name}, token=self.token))
-            header, _ = receive_packet(self.gate_sock)
-            
-        if header["type"] in ["ROOM_ASSIGNED", "ROOM_LOCATION"]:
-            payload = header["payload"]
-            self.room_id = payload.get("room_id")
-            host = payload["host"]
-            port = payload["port"]
-            
-            # Connect to Room Server
-            self.room_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.room_sock.connect((host, port))
-            
-            send_packet(self.room_sock, build_packet("AUTH_BACKEND", token=self.token))
-            self.receive_until(self.room_sock, "AUTH_BACKEND_OK")
-            
-            send_packet(self.room_sock, build_packet("JOIN_ROOM_BACKEND", {"room_name": name}, token=self.token))
-            self.receive_until(self.room_sock, "JOIN_ROOM_OK")
-            return True
-        return False
+        # 3. Connect to Room
+        room_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        room_client.connect((room_payload["host"], room_payload["port"]))
+        send_packet(room_client, {"type": MESSAGE_TYPES["AUTH_BACKEND"], "token": token, "payload": {"room_id": room_payload["room_id"]}})
+        receive_packet(room_client)
 
-    def upload_file(self, file_path):
-        filename = os.path.basename(file_path)
-        filesize = os.path.getsize(file_path)
-        chunk_size = 65536
-        total_chunks = (filesize + chunk_size - 1) // chunk_size
-        
-        sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                sha256.update(chunk)
-        checksum = sha256.hexdigest()
-        
+        chunk_size = 1024 * 1024 # 1MB
+        total_chunks = (file_size + chunk_size - 1) // chunk_size
+        checksum = get_checksum(TEST_FILE)
+
+        # --- UPLOAD BENCHMARK ---
+        print("\n[STEP 1] Starting Upload Benchmark...")
         start_time = time.time()
         
-        send_packet(self.room_sock, build_packet("UPLOAD_INIT", {
-            "room_id": self.room_id,
-            "room_name": self.room_name,
-            "filename": filename,
-            "filesize": filesize,
-            "chunk_size": chunk_size,
-            "total_chunks": total_chunks,
-            "checksum_sha256": checksum
-        }, token=self.token))
-        
-        header, _ = self.receive_until(self.room_sock, "UPLOAD_READY")
-        if header["type"] == "ERROR":
-            print(f"[!] UPLOAD_INIT failed: {header['payload'].get('message')}")
-            return 0, 0
-            
-        transfer_id = header["payload"]["transfer_id"]
-        
-        with open(file_path, "rb") as f:
-            for i in range(total_chunks):
-                chunk_data = f.read(chunk_size)
-                packet = build_packet("UPLOAD_CHUNK", {"transfer_id": transfer_id, "chunk_index": i}, token=self.token)
-                packet["payload_size"] = len(chunk_data)
-                header_json = json.dumps(packet).encode('utf-8')
-                self.room_sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
-                self.receive_until(self.room_sock, "CHUNK_ACK")
-                
-        send_packet(self.room_sock, build_packet("UPLOAD_FINISH", {"transfer_id": transfer_id}, token=self.token))
-        self.receive_until(self.room_sock, "UPLOAD_SUCCESS")
-        
-        duration = time.time() - start_time
-        return filesize, duration
+        send_packet(room_client, {
+            "type": MESSAGE_TYPES["UPLOAD_INIT"], "token": token,
+            "payload": {
+                "room_id": room_payload["room_id"], "filename": file_name,
+                "filesize": file_size, "chunk_size": chunk_size,
+                "total_chunks": total_chunks, "checksum_sha256": checksum
+            }
+        })
+        h, _ = receive_packet(room_client)
+        if h.get("type") != "UPLOAD_READY":
+            print(f"Error: Expected UPLOAD_READY, got {h.get('type')} ({h.get('payload', {}).get('message')})")
+            client.close()
+            return
+        transfer_id = h["payload"]["transfer_id"]
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--size-mb", type=int, default=5)
-    args = parser.parse_args()
-    
-    file_path = f"test_{args.size_mb}mb.bin"
-    if not os.path.exists(file_path):
-        print(f"[*] Creating {args.size_mb}MB test file...")
-        with open(file_path, "wb") as f:
-            f.write(os.urandom(args.size_mb * 1024 * 1024))
-            
-    client = ThroughputClient("bench_user", "bench_pass")
-    if not client.connect_and_login():
-        print("[!] Login failed")
-        return
+        with open(TEST_FILE, "rb") as f:
+            for i in range(total_chunks):
+                data = f.read(chunk_size)
+                send_packet(room_client, {
+                    "type": MESSAGE_TYPES["UPLOAD_CHUNK"], "token": token,
+                    "payload": {"transfer_id": transfer_id, "chunk_index": i, "chunk_size": len(data)}
+                }, data)
+                receive_packet(room_client)
+                if i % 100 == 0:
+                    print(f" Uploading: {i/total_chunks*100:.1f}%", end="\r")
+
+        send_packet(room_client, {"type": MESSAGE_TYPES["UPLOAD_FINISH"], "token": token, "payload": {"transfer_id": transfer_id}})
+        receive_packet(room_client)
         
-    if not client.create_and_join_room("BenchRoom"):
-        print("[!] Room join failed")
-        return
-        
-    print(f"[*] Starting upload of {file_path}...")
-    size, duration = client.upload_file(file_path)
-    
-    print("\n--- Throughput Test Results ---")
-    print(f"File Size:  {size / (1024*1024):.2f} MB")
-    print(f"Time Taken: {duration:.2f} s")
-    print(f"Throughput: {(size / duration) / (1024*1024):.2f} MB/s")
+        upload_duration = time.time() - start_time
+        upload_speed = (file_size / (1024**2)) / upload_duration
+        print(f"UPLOAD COMPLETE: {upload_duration:.2f}s ({upload_speed:.2f} MB/s)")
+
+        # --- DOWNLOAD BENCHMARK ---
+        print("\n[STEP 2] Starting Download Benchmark...")
+        # Get file_id
+        send_packet(room_client, {"type": MESSAGE_TYPES["FILE_LIST_REQUEST"], "token": token, "payload": {"room_name": room_payload["room_name"]}})
+        h, _ = receive_packet(room_client)
+        files = h["payload"]["files"]
+        file_id = next((f["file_id"] for f in files if f["original_filename"] == file_name), None)
+
+        if file_id is None:
+            print("Error: Could not find uploaded file in list.")
+            client.close()
+            return
+
+        start_time = time.time()
+        send_packet(room_client, {"type": MESSAGE_TYPES["DOWNLOAD_REQUEST"], "token": token, "payload": {"file_id": file_id}})
+        h, _ = receive_packet(room_client)
+        dl_transfer_id = h["payload"]["transfer_id"]
+        dl_total_chunks = h["payload"]["total_chunks"]
+
+        if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
+        dl_path = os.path.join(DOWNLOAD_DIR, f"bench_{file_name}")
+
+        with open(dl_path, "wb") as f:
+            for i in range(dl_total_chunks):
+                h, data = receive_packet(room_client)
+                f.write(data)
+                if i % 100 == 0:
+                    print(f" Downloading: {i/dl_total_chunks*100:.1f}%", end="\r")
+
+        download_duration = time.time() - start_time
+        download_speed = (file_size / (1024**2)) / download_duration
+        print(f"DOWNLOAD COMPLETE: {download_duration:.2f}s ({download_speed:.2f} MB/s)")
+
+        # Verify Integrity
+        print("\n[STEP 3] Verifying Integrity...")
+        dl_checksum = get_checksum(dl_path)
+        if dl_checksum == checksum:
+            print("INTEGRITY CHECK: PASSED (SHA-256 match)")
+        else:
+            print("INTEGRITY CHECK: FAILED (Mismatch!)")
+
+        client.close()
+    except Exception as e:
+        print(f"Benchmark Error: {e}")
+        try: client.close()
+        except: pass
+    finally:
+        room_client.close()
 
 if __name__ == "__main__":
-    main()
+    run_throughput_benchmark()
