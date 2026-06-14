@@ -1,166 +1,80 @@
-# AI Context - NetCourier
+# AI Context - NetCourier (Updated)
 
 Kamu adalah AI coding assistant untuk project **NetCourier**.
-
-Tujuanmu adalah membantu mengembangkan project sesuai dokumentasi, bukan mengubah scope sembarangan.
-
----
-
-## 1. Must Read First
-
-Sebelum coding, baca dokumen ini secara berurutan:
-
-1. `README.md`
-2. `docs/REQUIREMENTS.md`
-3. `docs/FEATURE_SPEC.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/API_SPEC.md`
-6. `docs/DATABASE.md`
-7. `docs/TESTING.md`
-8. `TASKS.md`
+Tujuanmu adalah membantu mengembangkan project sesuai arsitektur terbaru yang sudah beralih ke **Web-based UI** dengan performa tinggi.
 
 ---
 
-## 2. Project Summary
+## 1. Arsitektur Terkini (Modern Stack)
 
-NetCourier adalah aplikasi **Multi-Chat Room berbasis TCP Socket** dengan fitur **Reliable File Transfer**.
-
-Arsitektur:
+NetCourier telah bertransformasi dari Tkinter ke Web UI:
 ```txt
-Client -> Gateway/Auth/Load Balancer -> Process Server S1/S2 -> Central Database
+Browser (HTML/JS) <--> Web API Bridge (8080) <--> Gateway (9000) <--> Process Server S1/S2 (9101+)
 ```
 
-Gateway:
-- auth,
-- session,
-- PM global,
-- online user,
-- room directory,
-- load balancing,
-- room affinity.
-
-Process Server:
-- room chat,
-- room history,
-- file upload/download,
-- chunking,
-- checksum,
-- resume transfer.
-
-Client:
-- menggunakan Tkinter desktop GUI sebagai UI utama,
-- menjaga koneksi Gateway untuk PM,
-- menjaga koneksi Process Server untuk room chat/file transfer,
-- memakai worker thread dan UI event queue agar Tkinter tidak freeze.
+- **Web UI**: Menggunakan Tailwind CSS, Vanilla JS, dan SSE-style polling untuk real-time updates.
+- **Web API Bridge**: Bertindak sebagai jembatan HTTP-to-Socket. Mengelola `WebSession`, `GatewayConnection`, dan `RoomConnection`.
+- **Gateway**: Auth, Session, PM Global, Load Balancing, Presence.
+- **Process Server**: Room Chat, History, High-speed File Transfer, Admin Tools.
 
 ---
 
-## 3. Non-Negotiable Rules
+## 2. Fitur Utama yang Sudah Implement (Phase 1-9+)
 
-1. Jangan mengganti TCP socket dengan HTTP/REST sebagai komunikasi utama.
-2. Jangan membuat CLI/TUI sebagai UI utama; UI client wajib Tkinter desktop GUI.
-3. Jangan membuat Nginx sebagai load balancer utama.
-4. Gateway harus room-aware.
-5. PM harus lewat Gateway.
-6. Room chat harus lewat Process Server.
-7. File transfer harus lewat Process Server.
-8. User dalam room yang sama harus berada di Process Server yang sama.
-9. Client harus tetap bisa menerima PM saat sedang di room.
-10. Jangan simpan password plain text.
-11. Jangan simpan file besar di database.
-12. Jangan hardcode secret/token.
-13. Jangan menghapus fitur lama tanpa alasan.
-14. Jangan update widget Tkinter langsung dari socket/worker thread; gunakan queue dan `root.after`.
-15. Jangan membuat fitur di luar requirement tanpa update docs dan TASKS.
+- **High-Speed Transfer**: Menggunakan **1 MB chunks** (sebelumnya 64KB) dan **DB Batching** (commit setiap 10 chunk atau akhir transfer). Kecepatan mencapai **120+ MB/s** di localhost.
+- **True Resume Transfer**: Mendukung penghentian dan kelanjutan upload/download dari potongan terakhir yang sukses menggunakan protokol `RESUME_TRANSFER` dan `file.slice()`.
+- **Hybrid Upload Queue**: Antrean upload di Web UI dengan batas maksimal **2 transfer aktif** secara paralel untuk menjaga kestabilan bandwidth.
+- **Admin Tools**: Fitur **Kick User** dan **Delete File** terintegrasi dengan verifikasi kepemilikan room (`created_by`).
+- **Real-time UX**: 
+  - **Emoji Reactions**: Tambah/Hapus reaksi pada pesan secara real-time.
+  - **Typing Indicator**: Notifikasi "User is typing..." di dalam room.
+  - **Member List Sidebar**: Daftar anggota room yang otomatis terupdate.
+  - **Presence**: User online terdeteksi global segera setelah login (status `waiting`).
 
 ---
 
-## 4. Coding Rules
+## 3. Aturan Teknis Penting (Non-Negotiable)
 
-1. Gunakan Python.
-2. Gunakan `socket` untuk networking.
-3. Gunakan `threading` atau `select` untuk concurrency.
-4. Gunakan JSON untuk serialization.
-5. Gunakan length-prefixed framing untuk TCP packet.
-6. Simpan protocol common di `common/protocol.py`.
-7. Setiap message type sebaiknya punya handler.
-8. Pisahkan Gateway, Process Server, Client, dan Common module.
-9. Gunakan logging.
-10. Tambahkan error handling untuk malformed packet.
+1. **Thread Safety**: Seluruh class koneksi (`GatewayConnection`, `RoomConnection`) **WAJIB** menggunakan `threading.Lock()` untuk memproteksi `pending_requests` karena Web API melayani permintaan secara concurrent.
+2. **Web API Capacity**: Batas maksimal *request body* di `web_api/server.py` adalah **1024 MB (1GB)**. Jangan menurunkan batas ini karena akan merusak fitur upload file besar.
+3. **Chunking Standard**: Gunakan **1 MB (1048576 bytes)** sebagai standar ukuran chunk di Client, Web API, dan Server.
+4. **Database persistence**: Seluruh pesan room dan PM **WAJIB** disimpan ke SQLite sebelum di-broadcast.
+5. **Protocol**: Tetap menggunakan **Length-Prefixed JSON Framing** (4 byte length header) untuk komunikasi socket.
 
 ---
 
-## 5. Suggested Implementation Order
+## 4. Konteks Pengembangan Selanjutnya (Roadmap)
 
-1. `common/protocol.py`: encode/decode packet.
-2. Gateway basic TCP server.
-3. Client connect Gateway.
-4. Register/login/session.
-5. PM global.
-6. Backend register/heartbeat.
-7. Room directory/load balancing.
-8. Process Server auth backend.
-9. Room join/chat/history.
-10. File transfer init/chunk/finish.
-11. Checksum.
-12. Resume transfer.
-13. Load test.
-14. Documentation update.
+Tugas yang belum selesai dan menjadi prioritas AI selanjutnya:
 
----
-
-## 6. Architecture Constraints
-
-Gateway must not:
-- process file chunks,
-- store room chat in memory only,
-- randomly route user to backend without room affinity.
-
-Process Server must not:
-- authenticate password directly,
-- create session token,
-- handle global PM,
-- accept client without token validation.
-
-Client must:
-- maintain Gateway connection after login,
-- open Process Server connection after join room,
-- route PM action from Tkinter UI to Gateway,
-- route room chat, upload, and download actions from Tkinter UI to Process Server.
+1. **Read Receipts (Indikator Dibaca)**:
+   - Tambahkan kolom `is_read` di tabel `room_messages`.
+   - Implementasi event `ROOM_MESSAGE_READ` saat user menscroll pesan di Web UI.
+2. **Chat History Search**:
+   - Buat API di Web API untuk mencari konten chat menggunakan query `LIKE %query%`.
+   - Tambahkan UI search bar di atas chat area.
+3. **Web Dashboard Monitoring**:
+   - Gunakan `psutil` di server untuk mengambil statistik CPU/RAM/Traffic.
+   - Tampilkan grafik sederhana di Web UI untuk memantau kesehatan S1/S2.
+4. **TLS/SSL Security**:
+   - Implementasi `ssl.wrap_socket` untuk mengamankan data plaintext yang dikirim antar node.
+5. **Dockerization**:
+   - Buat `Dockerfile` untuk Gateway, Server, dan Web API.
+   - Susun `docker-compose.yml` untuk menjalankan seluruh stack dengan satu perintah.
 
 ---
 
-## 7. When Generating Code
+## 5. File Referensi Utama
 
-Always consider:
-- What component is this file for?
-- Does this feature belong to Gateway or Process Server?
-- Does the packet follow `docs/API_SPEC.md`?
-- Does it update database according to `docs/DATABASE.md`?
-- Does it satisfy `docs/TESTING.md`?
-
----
-
-## 8. Conflict Resolution
-
-If docs conflict:
-1. `docs/REQUIREMENTS.md` has highest priority for product behavior.
-2. `docs/ARCHITECTURE.md` has highest priority for component responsibility.
-3. `docs/API_SPEC.md` has highest priority for packet format.
-4. `docs/DATABASE.md` has highest priority for data structure.
-5. `TASKS.md` has highest priority for current implementation phase.
-
-If still ambiguous, do not guess silently. State assumption clearly.
-
+- `common/constants.py`: Daftar lengkap `MESSAGE_TYPES` (Sekarang berupa Dictionary, bukan Set).
+- `web_api/server.py`: Logika bridging HTTP ke Socket.
+- `web_ui/app.js`: Logika `UploadQueue` dan `Real-time Polling`.
+- `server/main.py`: Core logic Process Server & File Transfer.
+- `tests/`: Gunakan `auto_binary_test.py` dan `test_transfer_controls.py` untuk verifikasi regresi.
 
 ---
 
-## 7. Tkinter Rules
-
-1. File entry point client adalah `client/main.py`.
-2. UI utama harus dibuat dengan `tkinter` dan `ttk`.
-3. Gunakan `filedialog` untuk upload file.
-4. Gunakan `messagebox` hanya untuk error/confirmation penting; status biasa tampil di status bar.
-5. Gunakan `queue.Queue` untuk semua event dari socket thread ke UI.
-6. Gunakan `root.after(...)` untuk polling UI queue.
-7. Jangan menggunakan CLI prompt, curses, textual, rich TUI, atau command loop sebagai UI utama.
+## 6. Tips untuk AI Selanjutnya
+- Jika menemukan **"Network Error"** saat upload, cek apakah ada *crash* di Web API (biasanya karena race condition atau batasan ukuran body).
+- Selalu gunakan `taskkill /F /IM python.exe` sebelum melakukan restart layanan secara masal untuk menghindari port conflict.
+- Database berada di `data/netcourier.db`. Skema awal ada di `migrations/001_init.sql`.

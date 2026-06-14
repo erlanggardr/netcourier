@@ -17,6 +17,7 @@ class GatewayConnection:
         
         # Keep track of pending requests to match responses
         self.pending_requests = {}
+        self.lock = threading.Lock()
 
     def connect(self):
         try:
@@ -49,13 +50,17 @@ class GatewayConnection:
         req_id = header["request_id"]
         
         if callback:
-            self.pending_requests[req_id] = callback
+            with self.lock:
+                self.pending_requests[req_id] = callback
             
         try:
             send_packet(self.sock, header)
             return True
         except Exception as e:
             self.logger.error(f"Error sending request {msg_type}: {e}")
+            with self.lock:
+                if req_id in self.pending_requests:
+                    self.pending_requests.pop(req_id)
             self.running = False
             return False
 
@@ -80,8 +85,12 @@ class GatewayConnection:
         self.logger.debug(f"Received {msg_type} from Gateway")
         
         # Check if this is a response to a pending request
-        if req_id in self.pending_requests:
-            callback = self.pending_requests.pop(req_id)
+        callback = None
+        with self.lock:
+            if req_id in self.pending_requests:
+                callback = self.pending_requests.pop(req_id)
+        
+        if callback:
             self.app.run_in_ui(callback, header)
             return
 
