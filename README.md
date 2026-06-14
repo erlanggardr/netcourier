@@ -79,7 +79,7 @@ sequenceDiagram
     actor Client as Browser Client
     participant API as Web API Bridge
     participant GW as Gateway Server
-    database DB as SQLite Database
+    participant DB as SQLite Database
 
     Client->>API: POST /api/login {username, password}
     API->>GW: TCP: LOGIN {username, password}
@@ -101,7 +101,7 @@ sequenceDiagram
     participant API as Web API Bridge
     participant GW as Gateway Server
     participant S1 as Process Server (S1)
-    database DB as SQLite Database
+    participant DB as SQLite Database
 
     Client->>API: POST /api/rooms/join {room_name}
     API->>GW: TCP: JOIN_ROOM {room_name}
@@ -124,7 +124,7 @@ sequenceDiagram
     actor Client as Browser Client
     participant API as Web API Bridge
     participant S1 as Process Server (S1)
-    database DB as SQLite Database
+    participant DB as SQLite Database
     participant FS as S1 Storage
 
     Client->>Client: Calculate local file SHA-256 Checksum
@@ -166,7 +166,7 @@ sequenceDiagram
     actor Client as Browser Client
     participant API as Web API Bridge
     participant S1 as Process Server (S1)
-    database DB as SQLite Database
+    participant DB as SQLite Database
 
     Note over Client: Connection dropped -> user clicks Resume
     Client->>API: GET /api/rooms/files/resume?transfer_id=X&direction=upload
