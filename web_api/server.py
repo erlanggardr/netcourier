@@ -304,6 +304,17 @@ class WebServer:
                 self.send_response(conn, 500, {"error": f"Login failed: {e}"})
             return
 
+        if path == "/api/logout" and method == "POST":
+            if session.room_conn:
+                session.room_conn.disconnect()
+            if session.gateway_conn:
+                session.gateway_conn.send_request("LOGOUT", {})
+                session.gateway_conn.disconnect()
+            if session_id in self.sessions:
+                del self.sessions[session_id]
+            self.send_response(conn, 200, {"success": True})
+            return
+
         if not session:
             self.send_response(conn, 401, {"error": "Unauthorized"})
             return

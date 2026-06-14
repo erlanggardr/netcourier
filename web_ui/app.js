@@ -531,7 +531,12 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
     }
 });
 
-document.getElementById('btn-logout').addEventListener('click', () => {
+document.getElementById('btn-logout').addEventListener('click', async () => {
+    try {
+        if (sessionId) await apiCall('/logout', 'POST');
+    } catch (e) {
+        console.error("Logout error", e);
+    }
     sessionId = null;
     currentUser = null;
     currentRoom = null;
