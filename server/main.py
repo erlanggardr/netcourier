@@ -814,7 +814,7 @@ class ProcessServer:
             with get_db_connection() as db_conn:
                 cursor = db_conn.cursor()
                 cursor.execute("""
-                    SELECT f.stored_path, f.chunk_size, ft.status
+                    SELECT f.stored_path, f.chunk_size, ft.status, ft.total_chunks, ft.completed_chunks
                     FROM file_transfers ft
                     JOIN files f ON ft.file_id = f.file_id
                     WHERE ft.transfer_id = ?
@@ -825,24 +825,23 @@ class ProcessServer:
                     return
                     
                 stored_path = row["stored_path"]
-                chunk_size = row["chunk_size"]
+                total_chunks = row["total_chunks"]
+                completed_chunks = row["completed_chunks"]
                 
                 with open(stored_path, "ab" if chunk_index > 0 else "wb") as f:
                     f.write(binary_payload)
                     
-                cursor.execute("""
-                    INSERT INTO transfer_chunks (transfer_id, chunk_index, size_bytes, status)
-                    VALUES (?, ?, ?, 'received')
-                """, (transfer_id, chunk_index, len(binary_payload)))
-                
-                cursor.execute("""
-                    UPDATE file_transfers 
-                    SET completed_chunks = completed_chunks + 1, 
-                        bytes_transferred = bytes_transferred + ?,
-                        last_activity_at = ?
-                    WHERE transfer_id = ?
-                """, (len(binary_payload), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), transfer_id))
-                db_conn.commit()
+                # Optimization: Update DB every 10 chunks or if it's the last chunk
+                new_completed = completed_chunks + 1
+                if new_completed % 10 == 0 or new_completed == total_chunks:
+                    cursor.execute("""
+                        UPDATE file_transfers 
+                        SET completed_chunks = ?, 
+                            bytes_transferred = bytes_transferred + ?,
+                            last_activity_at = ?
+                        WHERE transfer_id = ?
+                    """, (new_completed, len(binary_payload), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), transfer_id))
+                    db_conn.commit()
                 
                 send_packet(conn, build_packet("CHUNK_ACK", {
                     "transfer_id": transfer_id,

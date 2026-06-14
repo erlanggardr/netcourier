@@ -444,7 +444,8 @@ class WebServer:
 
             import hashlib
             filesize = len(raw_body)
-            chunk_size = 65536
+            # Optimization: Increase chunk size to 1MB
+            chunk_size = 1024 * 1024
             total_chunks = (filesize + chunk_size - 1) // chunk_size
             sha256 = hashlib.sha256(raw_body).hexdigest()
 
@@ -458,7 +459,7 @@ class WebServer:
             })
 
             if not init_resp or init_resp.get("type") != "UPLOAD_READY":
-                self.send_response(conn, 400, {"error": "Upload init failed"})
+                self.send_response(conn, 400, {"error": f"Upload init failed: {init_resp.get('payload', {}).get('message') if init_resp else 'Timeout'}"})
                 return
 
             transfer_id = init_resp["payload"]["transfer_id"]
@@ -467,7 +468,8 @@ class WebServer:
                 chunk_data = raw_body[i*chunk_size : (i+1)*chunk_size]
                 chunk_payload = {
                     "transfer_id": transfer_id,
-                    "chunk_index": i
+                    "chunk_index": i,
+                    "chunk_size": len(chunk_data)
                 }
                 import struct
                 from common.protocol import build_packet
@@ -480,10 +482,21 @@ class WebServer:
                 def cb(h):
                     ack_res["h"] = h
                     ev.set()
-                session.room_conn.pending_requests[packet["request_id"]] = cb
+                
+                with session.room_conn.lock:
+                    session.room_conn.pending_requests[packet["request_id"]] = cb
                 
                 session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
-                ev.wait(5)
+                
+                # Wait for ACK (1MB chunk needs more time than 64KB)
+                if not ev.wait(10):
+                    self.send_response(conn, 400, {"error": f"Chunk {i} timeout"})
+                    return
+                
+                ack = ack_res.get("h")
+                if not ack or ack.get("type") != "CHUNK_ACK":
+                    self.send_response(conn, 400, {"error": f"Chunk {i} failed"})
+                    return
 
             finish_resp = self._sync_request(session.room_conn, "UPLOAD_FINISH", {"transfer_id": transfer_id})
             if finish_resp and finish_resp.get("type") == "UPLOAD_SUCCESS":

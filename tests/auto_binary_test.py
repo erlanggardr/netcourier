@@ -82,7 +82,7 @@ def test_file_transfer(file_name):
         
         # 4. Upload Init
         original_checksum = get_checksum(file_path)
-        chunk_size = 64 * 1024
+        chunk_size = 1024 * 1024
         total_chunks = (file_size + chunk_size - 1) // chunk_size
         upload_init = {
             "type": MESSAGE_TYPES["UPLOAD_INIT"],
@@ -105,7 +105,6 @@ def test_file_transfer(file_name):
         transfer_id = header["payload"]["transfer_id"]
         
         # 5. Upload Chunks
-        chunk_size = 64 * 1024
         with open(file_path, "rb") as f:
             idx = 0
             while True:
@@ -119,7 +118,7 @@ def test_file_transfer(file_name):
                 send_packet(room_client, chunk_header, data)
                 receive_packet(room_client)
                 idx += 1
-                if file_size > 5 * 1024 * 1024 and idx % 50 == 0:
+                if file_size > 5 * 1024 * 1024 and idx % 5 == 0:
                     print(f"Uploaded {f.tell() / file_size * 100:.1f}%...", end="\r")
         
         # 6. Upload Finish
