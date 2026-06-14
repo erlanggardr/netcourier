@@ -16,9 +16,10 @@ Gateway menangani fitur global. Process Server menangani room chat dan file tran
 
 ```mermaid
 flowchart LR
-    C[Tkinter Desktop Client] <-->|TCP Socket A: Auth, PM, Room Directory| G[Gateway / Auth / Load Balancer]
-    C <-->|TCP Socket B: Room Chat, File Transfer| S1[Process Server S1]
-    C <-->|TCP Socket B: Room Chat, File Transfer| S2[Process Server S2]
+    Browser[Web Browser Client] <-->|HTTP / REST / Event Polling| Bridge[Web API Bridge / client/main.py]
+    Bridge <-->|TCP Socket A: Auth, PM, Room Directory| G[Gateway / Auth / Load Balancer]
+    Bridge <-->|TCP Socket B: Room Chat, File Transfer| S1[Process Server S1]
+    Bridge <-->|TCP Socket B: Room Chat, File Transfer| S2[Process Server S2]
 
     G <-->|SQL| DB[(Central Database)]
     S1 <-->|SQL| DB
@@ -67,20 +68,15 @@ python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000
 
 ## 5. Component Responsibility
 
-## 5.1 Tkinter Desktop Client
+## 5.1 Web Client & API Bridge
 
 Tugas:
-- membuka desktop GUI berbasis Tkinter,
-- connect ke Gateway,
-- login/register melalui form,
-- menjaga Gateway receiver thread untuk PM,
-- request room list dan menampilkan tabel room,
-- create/join room melalui tombol/form,
-- connect ke Process Server,
-- menjaga room receiver thread untuk room chat/file events,
-- upload/download file melalui file picker dan tombol,
-- menampilkan progress dengan progress bar,
-- memproses event socket melalui thread-safe UI queue agar GUI tidak freeze.
+- Browser menampilkan Web UI berbasis HTML/CSS/JS.
+- Web API Server (`client/main.py` / `web_api/server.py`) menjembatani browser dengan server TCP.
+- Melakukan otentikasi login/register dan PM via REST API.
+- Menjaga koneksi TCP socket di latar belakang ke Gateway dan Process Server per sesi pengguna.
+- Melakukan polling event socket menggunakan long-polling `/api/events` ke browser secara real-time.
+- Melakukan unggah dan unduh berkas secara modular dengan REST API, memanfaatkan segmentasi data (chunking).
 
 Client punya dua koneksi:
 - **Gateway connection**: selalu aktif selama user login.
@@ -358,6 +354,17 @@ sequenceDiagram
 
 ---
 
+## 8.7 File Transfer Optimizations
+
+Untuk melayani transfer berkas berukuran besar (500MB - 1GB+) dengan kecepatan maksimal di localhost, NetCourier mengimplementasikan optimasi berikut:
+
+1. **Bypass UTF-8 body decoding pada Web API Bridge**: Pintu gerbang REST API (`web_api/server.py`) melewatkan proses decoding UTF-8 dan parsing JSON untuk request biner `/api/rooms/files/upload?action=chunk`, menghemat beban CPU dan mencegah memory bloating.
+2. **TCP_NODELAY (Nagle's Algorithm Disabled)**: Semua socket koneksi TCP (client ke Gateway, backend ke Gateway, client ke Process Server, dan koneksi HTTP client) dikonfigurasi dengan opsi `TCP_NODELAY` untuk menonaktifkan delay ACK default (40ms) di localhost.
+3. **Paralel Chunk Upload**: Klien Web UI (`web_ui/app.js`) mengunggah potongan file (chunk 1MB) secara bersamaan menggunakan worker pool paralel dengan konkurensi maksimal 4 request chunk secara paralel.
+4. **Out-of-order Writes & File Touch**: Process Server (`server/main.py`) menyentuh/membuat file kosong pada event `UPLOAD_INIT`, dan selalu menggunakan mode file `"r+b"` dengan penyelarasan offset `seek(offset)` saat menulis data chunk. Hal ini memfasilitasi penulisan chunk data yang aman meskipun urutan tibanya acak atau secara paralel.
+
+---
+
 ## 9. Concurrency Model
 
 ### Gateway
@@ -374,28 +381,18 @@ sequenceDiagram
 - lock per transfer for chunk state,
 - lock for socket sending.
 
-### Client
-- Tkinter main thread untuk event loop dan update widget,
-- gateway receiver thread,
-- room receiver thread,
-- upload/download worker thread,
-- thread-safe `queue.Queue` untuk mengirim event dari socket thread ke Tkinter main thread.
+### Client (Web & API Bridge)
+- Browser main thread untuk JavaScript event loop dan update DOM.
+- Web API server ThreadPool untuk melayani request HTTP konkuren dari browser klien.
+- Gateway receiver thread (per session) untuk menangani presensi dan PM.
+- Room receiver thread (per session) untuk menangani chat room dan event biner.
+- Antrean event thread-safe di memori `WebSession.events` dengan mekanisme synchronization conditional variables.
 
 ---
 
-## 9.1 Tkinter Threading Rule
+## 9.1 Concurrent Session Threading Rule
 
-Tkinter tidak thread-safe. Karena itu, receiver thread dan worker thread tidak boleh mengubah widget secara langsung. Semua event jaringan harus dimasukkan ke `queue.Queue`, lalu Tkinter main thread mengambil event tersebut menggunakan `root.after(...)`.
-
-Contoh alur:
-
-```txt
-Gateway receiver thread -> ui_event_queue.put(event)
-Room receiver thread    -> ui_event_queue.put(event)
-Tkinter main thread     -> root.after(50, process_ui_queue)
-```
-
-Aturan ini wajib agar UI tidak freeze dan tidak crash saat menerima pesan real-time atau progress transfer.
+Web API melayani banyak request HTTP klien secara bersamaan. Untuk menghindari race conditions, instansi `GatewayConnection` dan `RoomConnection` harus menggunakan `threading.Lock()` ketika mengakses peta request (`pending_requests`). Sinkronisasi event real-time dikirim menggunakan antrean thread-safe `WebSession.events` dan diblokir dengan `threading.Condition()` hingga browser melakukan request GET `/api/events`.
 
 ---
 

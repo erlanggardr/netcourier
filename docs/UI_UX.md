@@ -1,6 +1,6 @@
-# UI/UX Specification - NetCourier Tkinter Desktop GUI
+# UI/UX Specification - NetCourier Web Client GUI
 
-NetCourier menggunakan **Tkinter desktop GUI** sebagai UI utama client. Client **tidak boleh berbasis CLI/TUI**. CLI hanya boleh digunakan untuk menjalankan Gateway, Process Server, dan script testing.
+NetCourier menggunakan **Web Client GUI** (HTML/CSS/JS) sebagai UI utama client. Client **tidak boleh berbasis CLI/TUI**. CLI hanya boleh digunakan untuk menjalankan Gateway, Process Server, dan script testing.
 
 UI harus sederhana, stabil, mudah didemokan, dan tetap memperlihatkan konsep jaringan utama: koneksi Gateway, koneksi Process Server, PM global, room chat, file transfer, progress transfer, dan status koneksi.
 
@@ -346,51 +346,50 @@ Rules:
 
 ---
 
-## 10. Threading and UI Safety
+## 10. Concurrent Web Sessions and UI Updates
 
-Tkinter hanya boleh di-update dari main thread. Semua event dari socket thread harus masuk ke UI queue.
+Browser Web UI berinteraksi secara asinkron dengan Web API server melalui fetch request. Event real-time disalurkan dari server TCP ke Web API server, kemudian diteruskan ke browser melalui mekanisme HTTP Long-polling `/api/events`.
 
 Required pattern:
 
-```python
-# worker/receiver thread
-ui_queue.put({"type": "PM_RECEIVED", "payload": payload})
-
-# tkinter main thread
-root.after(50, process_ui_queue)
+```javascript
+// Web UI JavaScript Polling Loop
+async function pollEvents() {
+    try {
+        const response = await fetch(`/api/events?session_id=${sessionId}`);
+        const data = await response.json();
+        for (const event of data.events) {
+            handleEvent(event);
+        }
+    } catch (e) {
+        console.error("Polling error", e);
+    }
+    setTimeout(pollEvents, 500); // Poll again
+}
 ```
 
-Receiver thread:
-- Gateway receiver thread menerima PM, online user update, room directory response.
-- Room receiver thread menerima room chat, system event, file event.
-
-Worker thread:
-- Upload worker.
-- Download worker.
-- Checksum worker jika file besar.
+Web API Threads:
+- Thread pool HTTP melayani request asinkron dari browser.
+- Thread socket penerima menerima pesan dari Gateway/Process Server secara terus-menerus dan menyimpannya ke antrean `WebSession.events`.
 
 Rules:
-- Jangan memanggil `text_widget.insert(...)` dari socket thread.
-- Jangan memanggil `progressbar['value'] = ...` dari upload thread.
-- Semua update widget harus lewat `process_ui_queue()`.
+- Klien web (JS) tidak boleh memblokir UI saat melakukan transfer berkas.
+- Status progres upload/download diperbarui menggunakan UI widget berbasis web (HTML progress element atau flexbox component).
 
 ---
 
-## 11. Suggested Tkinter Files
+## 11. Web Client & API Bridge Files
 
 ```txt
 client/
-├── main.py                 # entry point
-├── app.py                  # NetCourierApp root controller
-├── auth_view.py            # login/register UI
-├── waiting_view.py         # online users, PM, room list
-├── room_view.py            # room chat, files, transfer panel
-├── widgets.py              # reusable widgets
+├── main.py                 # Entry point Web Server / HTTP-to-TCP launcher
 ├── gateway_connection.py   # Gateway socket client
-├── room_connection.py      # Process Server socket client
-├── uploader.py             # upload worker
-├── downloader.py           # download worker
-└── ui_events.py            # event type constants / queue helpers
+└── room_connection.py      # Process Server socket client
+web_ui/
+├── index.html              # HTML layout Single Page Application
+└── app.js                  # Javascript logic (polling, upload queue, DOM updates)
+web_api/
+└── server.py               # Custom HTTP Server & REST API translator
 ```
 
 ---
@@ -411,7 +410,7 @@ Isi help:
 
 ## 13. UX Rules
 
-1. UI utama wajib Tkinter desktop GUI.
+1. UI utama wajib berupa Web UI di browser.
 2. Jangan gunakan CLI/TUI sebagai UI client utama.
 3. PM prefix harus berbeda dari room chat.
 4. System event harus berbeda dari user message.
@@ -420,4 +419,4 @@ Isi help:
 7. Waiting Area dan Room Area harus terlihat berbeda.
 8. Button yang memicu request network harus disabled sementara saat request berjalan bila perlu.
 9. GUI tidak boleh freeze saat upload/download atau menerima banyak pesan.
-10. Semua update UI dari thread jaringan harus melalui queue dan `root.after`.
+10. Semua update UI dari thread jaringan dikirim ke browser via `/api/events` long-polling.

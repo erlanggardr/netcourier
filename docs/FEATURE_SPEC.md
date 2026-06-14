@@ -13,7 +13,7 @@ Guest.
 Guest membuat akun baru melalui Gateway.
 
 ### Normal Flow
-1. Guest membuka aplikasi desktop Tkinter.
+1. Guest membuka Web UI di browser.
 2. Guest mengisi form Register: username, password, dan display name.
 3. Guest menekan tombol **Register**.
 4. Client mengirim packet `REGISTER` ke Gateway.
@@ -43,7 +43,7 @@ Registered user.
 User login melalui Gateway untuk mendapatkan session token.
 
 ### Normal Flow
-1. User mengisi form Login pada aplikasi Tkinter dan menekan tombol **Login**.
+1. User mengisi form Login pada antarmuka Web UI di browser dan menekan tombol **Login**.
 2. Client mengirim `LOGIN`.
 3. Gateway cek username dan password hash.
 4. Gateway cek duplicate login.
@@ -93,29 +93,29 @@ Setelah login, user berada di waiting room Gateway. Waiting room bukan room chat
 
 ---
 
-## 3.1 Feature: Tkinter Client UI
+## 3.1 Feature: Web UI & HTTP-to-TCP API Bridge
 
 ### Actor
 Authenticated user and guest.
 
 ### Description
-NetCourier menggunakan desktop GUI berbasis Tkinter sebagai UI utama. User tidak menggunakan CLI/TUI untuk mengakses fitur client. UI menyediakan form login/register, waiting room, online user list, private message panel, room list, room chat panel, file list, upload/download controls, transfer progress, dan status bar.
+NetCourier menggunakan aplikasi Single Page Web UI berbasis HTML/CSS/JS yang dihubungkan ke server melalui jembatan HTTP-to-TCP (`web_api/server.py`). Seluruh antarmuka dikendalikan melalui browser. Web UI menyediakan form login/register, waiting room, online user list, private message panel, room list, room chat panel, file list, upload/download controls, transfer progress, dan status bar.
 
 ### Normal Flow
-1. User menjalankan `python client/main.py`.
-2. Aplikasi membuka jendela Tkinter.
-3. User login/register melalui form.
-4. Setelah login, user masuk ke Waiting Room window/panel.
+1. User menjalankan launcher client (`python client/main.py`) yang memulai HTTP Web Server.
+2. User membuka tautan `http://localhost:8080` di browser.
+3. User login/register melalui form Web UI.
+4. Setelah login, browser menerima session cookie/token dan mengarahkan pengguna ke Waiting Room view.
 5. User dapat mengirim PM, melihat user online, membuat/join room.
-6. Saat join room, UI menampilkan Room Chat panel tanpa memutus koneksi Gateway.
-7. Receiver thread menerima event dari Gateway dan Process Server, lalu mengirim update ke UI melalui thread-safe queue.
+6. Saat join room, Web UI menampilkan Room Chat panel, sedangkan API bridge tetap mempertahankan koneksi Gateway di latar belakang.
+7. Event yang masuk ke TCP socket akan dikumpulkan di memori server dan dikirim ke browser secara berkala menggunakan long-polling `/api/events`.
 
 ### Acceptance Criteria
-- Semua fitur user-facing tersedia melalui GUI.
-- GUI tidak freeze saat menerima chat, PM, upload, atau download.
-- Update dari socket thread tidak memanggil widget Tkinter secara langsung; semua update masuk melalui UI queue dan diproses oleh main thread Tkinter.
-- File upload menggunakan file picker.
-- Progress upload/download tampil dengan progress bar.
+- Semua fitur user-facing tersedia melalui Web UI di browser.
+- Web UI responsif dan tidak membeku (*non-blocking*) saat menerima obrolan, PM, upload, atau download.
+- Komunikasi socket TCP dilindungi oleh kunci thread-safe (`threading.Lock`), dan pembaruan event dikirim menggunakan antrean sinkronisasi `WebSession.events`.
+- Pengunggahan dan pengunduhan file didukung langsung melalui web interface.
+- Progress upload/download ditampilkan secara real-time dengan status bar berbasis Web.
 
 ---
 
@@ -468,3 +468,69 @@ Script melakukan simulasi beban.
 - max latency,
 - throughput,
 - error rate.
+
+---
+
+## 17. Feature: Room Message Reactions (Emoji Reactions)
+
+### Actor
+Room member.
+
+### Description
+User dapat menambahkan atau menghapus reaksi emoji (seperti 👍, ❤️, 😂, dll.) pada pesan obrolan di dalam room. Reaksi didefinisikan per user per pesan dan dipancarkan ke seluruh anggota room secara real-time.
+
+### Normal Flow
+1. User mengarahkan kursor ke pesan obrolan di Web UI.
+2. User memilih salah satu emoji dari menu reaksi.
+3. Client mengirim `ROOM_MESSAGE_REACTION` dengan payload `message_id`, `emoji`, dan `action = 'add'` atau `'remove'`.
+4. Process Server memproses permintaan, menyimpan perubahan reaksi di database `message_reactions`, dan memancarkan `ROOM_REACTION_BROADCAST` ke seluruh anggota room.
+5. Elemen UI penerima memperbarui jumlah reaksi emoji dan daftar pemberi reaksi secara dinamis.
+
+### Acceptance Criteria
+- Reaksi emoji tersimpan dan terhapus dengan benar di database.
+- Perubahan reaksi diperbarui secara dinamis tanpa me-refresh chat.
+
+---
+
+## 18. Feature: Admin Kick User
+
+### Actor
+Room owner (admin).
+
+### Description
+Pemilik/pembuat room memiliki hak administratif untuk mendepak (*kick*) pengguna lain dari room.
+
+### Normal Flow
+1. Admin menekan tombol **Kick** di sebelah nama pengirim pesan (atau dari daftar anggota room) di Web UI.
+2. Client mengirim `ROOM_KICK_USER` dengan payload `username` target.
+3. Process Server melakukan pengecekan status kepemilikan room. Jika pengirim adalah owner, target dipaksa keluar dari room (status presensi dirujuk ke waiting room) dan Gateway diinfokan.
+4. Process Server menyiarkan (broadcast) `SYSTEM_EVENT` bahwa user bersangkutan telah dikeluarkan oleh owner.
+5. Client target menerima notifikasi dikeluarkan dan dialihkan kembali ke Dashboard/Waiting Room secara otomatis.
+
+### Acceptance Criteria
+- Hanya pemilik room asli yang dapat mengeluarkan anggota room.
+- Anggota lain tidak memiliki tombol kick atau ditolak dengan error `PERMISSION_DENIED`.
+- Anggota yang di-kick dialihkan keluar secara instan dan daftar anggota diperbarui.
+
+---
+
+## 19. Feature: Admin Delete File
+
+### Actor
+Room owner (admin).
+
+### Description
+Pemilik/pembuat room dapat menghapus file yang telah diunggah di dalam room. Penghapusan ini bersifat logis dan aman.
+
+### Normal Flow
+1. Admin menekan tombol **Delete File** pada kartu file di chat room Web UI.
+2. Client mengirim `ROOM_DELETE_FILE` dengan payload `file_id`.
+3. Process Server memverifikasi hak akses admin. Jika valid, status file diubah menjadi `'deleted'` di tabel `files` dan chat file card diset `is_deleted = 1` di tabel `room_messages`.
+4. Process Server menyiarkan `ROOM_DELETE_FILE_BROADCAST` berisi `message_id` dan `file_id` ke seluruh anggota room, serta menyiarkan pesan sistem `SYSTEM_EVENT`.
+5. Semua browser klien di room mendeteksi broadcast dan menghapus kartu file dari DOM layar mereka seketika.
+6. Permintaan unduhan file yang telah dihapus akan ditolak dengan error `FILE_NOT_FOUND`.
+
+### Acceptance Criteria
+- Hanya owner yang dapat menghapus file.
+- Pesan file hilang seketika dari layar semua user yang online di room.
+- Berkas yang telah dihapus tidak dapat diunduh lagi.

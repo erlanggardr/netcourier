@@ -29,17 +29,14 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ---
 
-## Phase 2A - Tkinter Client Shell
+## Phase 2A - Web Client UI & HTTP-to-TCP Bridge
 
-- [x] Buat `client/main.py` sebagai entry point Tkinter.
-- [x] Buat `client/app.py` untuk class utama aplikasi.
-- [x] Buat Login/Register view.
-- [x] Buat Waiting Room view.
-- [x] Buat Room Chat view.
-- [x] Buat reusable widgets untuk status bar, message list, user list, room list, file list, dan transfer progress.
-- [x] Implement UI event queue menggunakan `queue.Queue`.
-- [x] Implement `root.after(...)` untuk polling event queue.
-- [x] Pastikan GUI tidak freeze saat koneksi Gateway berjalan.
+- [x] Buat `client/main.py` sebagai entry point server Web UI & API.
+- [x] Buat `web_api/server.py` untuk mengelola REST API dan session bridge.
+- [x] Buat antarmuka Login/Register menggunakan HTML/CSS/JS.
+- [x] Buat antarmuka Waiting Room dan Room Chat di browser.
+- [x] Implementasi event queue & long-polling `/api/events` untuk real-time update.
+- [x] Pastikan perutean REST dan file transfer berfungsi secara non-blocking.
 
 ## Phase 2 - Gateway Basic
 
@@ -59,7 +56,7 @@ Gunakan checklist ini sebagai roadmap implementasi.
 ## Phase 3 - PM and Presence
 
 - [x] Implement `user_presence`.
-- [x] Implement online users request and Tkinter table update.
+- [x] Implement online users request and Web UI list update.
 - [x] Implement `PRIVATE_MESSAGE_SEND`.
 - [x] Implement PM delivery ke online user.
 - [x] Implement PM stored_offline.

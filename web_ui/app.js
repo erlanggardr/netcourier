@@ -71,9 +71,13 @@ class UploadQueue {
     pause(id) {
         const item = this.transfers.get(id);
         if (!item) return;
-        if (item.status === 'uploading' && item.xhr) {
+        if (item.status === 'uploading') {
             item.status = 'paused';
-            item.xhr.abort();
+            if (item.activeXHRs) {
+                for (const xhr of item.activeXHRs) {
+                    xhr.abort();
+                }
+            }
         } else if (item.status === 'queued') {
             item.status = 'paused';
         }
@@ -96,8 +100,12 @@ class UploadQueue {
         const oldStatus = item.status;
         item.status = 'cancelled';
         
-        if (oldStatus === 'uploading' && item.xhr) {
-            item.xhr.abort();
+        if (oldStatus === 'uploading') {
+            if (item.activeXHRs) {
+                for (const xhr of item.activeXHRs) {
+                    xhr.abort();
+                }
+            }
         } else {
             // Remove from queue if it was there
             this.queue = this.queue.filter(i => i.id !== id);
@@ -110,72 +118,160 @@ class UploadQueue {
         }, 2000);
     }
 
+    async calculateFileSHA256(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    }
+
     async uploadFile(item) {
-        // --- TRUE RESUME LOGIC (Phase 8) ---
-        // 1. If we have a transfer_id (we were paused), ask server for progress
         let startChunk = 0;
-        if (item.transfer_id) {
+        let transferId = item.transfer_id || null;
+
+        // 1. If we have a transfer_id (we were paused), ask server for progress
+        if (transferId) {
             try {
-                const res = await apiCall(`/rooms/files/resume?transfer_id=${item.transfer_id}&direction=upload`);
+                const res = await apiCall(`/rooms/files/resume?transfer_id=${transferId}&direction=upload`);
                 startChunk = res.start_chunk || 0;
                 console.log(`Resuming ${item.file.name} from chunk ${startChunk}`);
             } catch (e) {
                 console.warn("Resume failed, starting from scratch", e);
-                item.transfer_id = null; // Reset to start fresh
+                transferId = null;
+                item.transfer_id = null;
             }
         }
 
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            item.xhr = xhr;
-            
-            // Build URL - if resuming, server needs the transfer_id
-            let url = `/api/rooms/files/upload?room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}`;
-            if (item.transfer_id) {
-                url += `&transfer_id=${item.transfer_id}&start_chunk=${startChunk}`;
+        const chunkSize = 1024 * 1024; // 1MB chunk size
+        const totalChunks = Math.ceil(item.file.size / chunkSize);
+
+        // 2. Initialize upload if not already created
+        if (!transferId) {
+            const checksum = await this.calculateFileSHA256(item.file);
+            const initRes = await apiCall(`/rooms/files/upload?action=init&room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}&filesize=${item.file.size}&checksum_sha256=${checksum}`, 'POST');
+            transferId = initRes.transfer_id;
+            item.transfer_id = transferId;
+        }
+
+        // Initialize speed tracking
+        item.startTime = Date.now();
+        item.startBytes = startChunk * chunkSize;
+        item.speed = '';
+
+        // 3. Parallel upload (max 4 concurrent chunk requests)
+        const maxConcurrentChunks = 4;
+        const activeXHRs = new Set();
+        item.activeXHRs = activeXHRs;
+
+        let currentChunkIndex = startChunk;
+        let hasError = null;
+
+        const uploadWorker = async () => {
+            while (currentChunkIndex < totalChunks && !hasError) {
+                if (item.status === 'paused' || item.status === 'cancelled') {
+                    throw new Error(item.status);
+                }
+
+                const i = currentChunkIndex++;
+                if (i >= totalChunks) break;
+
+                const chunkStart = i * chunkSize;
+                const chunkEnd = Math.min(chunkStart + chunkSize, item.file.size);
+                const chunkBlob = item.file.slice(chunkStart, chunkEnd);
+
+                await new Promise((resolve, reject) => {
+                    if (item.status === 'paused' || item.status === 'cancelled') {
+                        reject(new Error(item.status));
+                        return;
+                    }
+
+                    const xhr = new XMLHttpRequest();
+                    activeXHRs.add(xhr);
+
+                    const url = `/api/rooms/files/upload?action=chunk&transfer_id=${transferId}&chunk_index=${i}&room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}`;
+                    xhr.open('POST', url, true);
+                    xhr.setRequestHeader('Session-Id', sessionId);
+                    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+                    xhr.upload.onprogress = (e) => {
+                        if (e.lengthComputable) {
+                            if (!item.chunkProgresses) item.chunkProgresses = {};
+                            item.chunkProgresses[i] = e.loaded;
+
+                            let bytesAlreadyUploaded = startChunk * chunkSize;
+                            for (const idx in item.chunkProgresses) {
+                                bytesAlreadyUploaded += item.chunkProgresses[idx];
+                            }
+                            if (bytesAlreadyUploaded > item.file.size) {
+                                bytesAlreadyUploaded = item.file.size;
+                            }
+                            item.progress = Math.round((bytesAlreadyUploaded / item.file.size) * 100);
+                            
+                            const now = Date.now();
+                            const elapsed = (now - item.startTime) / 1000;
+                            if (elapsed > 0) {
+                                const bytesSentInSession = bytesAlreadyUploaded - item.startBytes;
+                                const speedBps = bytesSentInSession / elapsed;
+                                item.speed = `${formatBytes(speedBps)}/s`;
+                            } else {
+                                item.speed = '';
+                            }
+                            this.render();
+                        }
+                    };
+
+                    xhr.onload = () => {
+                        activeXHRs.delete(xhr);
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve();
+                        } else {
+                            const err = new Error(`Chunk ${i} failed: ${xhr.statusText}`);
+                            hasError = err;
+                            reject(err);
+                        }
+                    };
+
+                    xhr.onerror = () => {
+                        activeXHRs.delete(xhr);
+                        const err = new Error('Network error');
+                        hasError = err;
+                        reject(err);
+                    };
+
+                    xhr.onabort = () => {
+                        activeXHRs.delete(xhr);
+                        const err = new Error('Aborted');
+                        hasError = err;
+                        reject(err);
+                    };
+
+                    xhr.send(chunkBlob);
+                });
             }
-            
-            xhr.open('POST', url, true);
-            xhr.setRequestHeader('Session-Id', sessionId);
-            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        };
 
-            xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    // For UI, we calculate based on the whole file
-                    // But if we start from chunk 10 (10MB), e.loaded starts from 0 for the remaining data
-                    const bytesAlreadyUploaded = startChunk * (1024 * 1024);
-                    const totalBytes = item.file.size;
-                    const currentTotalUploaded = bytesAlreadyUploaded + e.loaded;
-                    item.progress = Math.round((currentTotalUploaded / totalBytes) * 100);
-                    this.render();
-                }
-            };
+        const workers = [];
+        for (let w = 0; w < Math.min(maxConcurrentChunks, totalChunks - startChunk); w++) {
+            workers.push(uploadWorker());
+        }
 
-            xhr.onload = () => {
-                item.xhr = null;
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    const data = JSON.parse(xhr.responseText);
-                    item.transfer_id = data.transfer_id; // Store for future pause/resume
-                    resolve(data);
-                } else {
-                    reject(new Error(xhr.statusText));
-                }
-            };
+        try {
+            await Promise.all(workers);
+        } catch (err) {
+            // Abort all active XHRs
+            for (const xhr of activeXHRs) {
+                xhr.abort();
+            }
+            throw err;
+        } finally {
+            item.activeXHRs = null;
+        }
 
-            xhr.onerror = () => {
-                item.xhr = null;
-                reject(new Error('Network error'));
-            };
-            
-            xhr.onabort = () => {
-                item.xhr = null;
-                reject(new Error('Aborted'));
-            };
-
-            // If resuming, we slice the file
-            const blobToSend = startChunk > 0 ? item.file.slice(startChunk * 1024 * 1024) : item.file;
-            xhr.send(blobToSend);
-        });
+        // 4. Send upload finish request
+        const finishRes = await apiCall(`/rooms/files/upload?action=finish&transfer_id=${transferId}&room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}`, 'POST');
+        item.speed = '';
+        return finishRes;
     }
 
     render() {
@@ -211,6 +307,8 @@ class UploadQueue {
                 controls += `<button onclick="uploadQueue.cancel('${item.id}')" class="ml-1 hover:text-red-500"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"/></svg></button>`;
             }
 
+            const speedText = (item.status === 'uploading' && item.speed) ? ` • ${item.speed}` : '';
+
             div.innerHTML = `
                 <div class="flex justify-between mb-1 truncate">
                     <span class="truncate pr-8 font-medium">${item.file.name}</span>
@@ -225,7 +323,7 @@ class UploadQueue {
                     <div class="h-full bg-primary transition-all duration-300 ${item.status === 'paused' ? 'opacity-50' : ''}" style="width: ${item.progress}%"></div>
                 </div>
                 <div class="flex justify-between mt-1 text-[10px] text-gray-500">
-                    <span>${formatBytes(item.file.size)}</span>
+                    <span>${formatBytes(item.file.size)}${speedText}</span>
                     <span>${item.progress}%</span>
                 </div>
             `;
@@ -260,13 +358,25 @@ window.kickUser = async function(username) {
     } catch (e) {}
 }
 
+window.refreshRoomMessages = async function() {
+    if (!currentRoom) return;
+    try {
+        const data = await apiCall(`/rooms/messages?room_name=${currentRoom}`);
+        UI.roomChatHistory.innerHTML = '';
+        data.messages.forEach(msg => {
+            appendMessage(UI.roomChatHistory, msg.sender_username, msg.message, msg.timestamp, msg.message_type, msg.message_id, msg.reactions);
+        });
+        UI.roomChatHistory.scrollTop = UI.roomChatHistory.scrollHeight;
+    } catch(e) {}
+}
+
 window.deleteFile = async function(fileId) {
     if (!confirm(`Are you sure you want to delete this file?`)) return;
     try {
         await apiCall('/rooms/files/delete', 'POST', { file_id: fileId });
         showToast(`File deleted.`, 'success');
-        // Refresh room history to hide deleted file immediately
-        if (currentRoom) joinRoom(currentRoom);
+        // Refresh room messages locally to hide deleted file immediately
+        await window.refreshRoomMessages();
     } catch (e) {}
 }
 
@@ -815,9 +925,10 @@ function appendMessage(container, sender, text, time, type = 'text', messageId =
     if (messageId) div.setAttribute('data-message-id', messageId);
     
     let contentHtml = text;
+    let fileData = null;
     if (type === 'file') {
         try {
-            const fileData = typeof text === 'string' ? JSON.parse(text) : text;
+            fileData = typeof text === 'string' ? JSON.parse(text) : text;
             contentHtml = `
                 <div class="flex items-center gap-3 p-3 bg-black/20 rounded-lg cursor-pointer hover:bg-black/30 transition-colors border border-gray-700/50" onclick="downloadFile(${fileData.file_id}, '${fileData.filename.replace(/'/g, "\\'")}')">
                     <div class="bg-primary/20 p-2 rounded-lg">
@@ -838,7 +949,7 @@ function appendMessage(container, sender, text, time, type = 'text', messageId =
     const isOwner = currentRoomData && currentRoomData.owner_id === currentUser.user_id;
     const adminActionsHtml = isOwner ? `
         <div class="admin-actions flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            ${type === 'file' ? `<button class="text-[9px] bg-red-900/50 hover:bg-red-800 px-1.5 py-0.5 rounded text-red-200 transition-colors" onclick="window.deleteFile(${messageId})">Delete File</button>` : ''}
+            ${type === 'file' && fileData ? `<button class="text-[9px] bg-red-900/50 hover:bg-red-800 px-1.5 py-0.5 rounded text-red-200 transition-colors" onclick="window.deleteFile(${fileData.file_id})">Delete File</button>` : ''}
             ${!isMe ? `<button class="text-[9px] bg-red-900/50 hover:bg-red-800 px-1.5 py-0.5 rounded text-red-200 transition-colors" onclick="window.kickUser('${sender}')">Kick</button>` : ''}
         </div>
     ` : '';
@@ -855,7 +966,7 @@ function appendMessage(container, sender, text, time, type = 'text', messageId =
         <span class="text-[10px] uppercase tracking-wider text-gray-600 mb-1 px-1 font-bold">${sender} • ${time}</span>
         <div class="message-bubble-wrapper relative flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%]">
             ${reactionBtnHtml}
-            <div class="px-4 py-2 rounded-2xl shadow-sm ${isMe ? 'bg-primary text-white rounded-tr-none' : 'bg-gray-800 text-gray-200 rounded-tl-none'} break-words w-full">
+            <div class="px-4 py-2 rounded-2xl shadow-sm ${isMe ? 'bg-primary text-white rounded-tr-none' : 'bg-gray-800 text-gray-200 rounded-tl-none'} break-words w-fit max-w-full">
                 ${contentHtml}
             </div>
             ${adminActionsHtml}
@@ -933,6 +1044,12 @@ function handleEvent(ev) {
         const { sender_username, message, timestamp, message_type } = ev.payload;
         if (currentRoom) {
             appendMessage(UI.roomChatHistory, sender_username, message, timestamp, message_type || 'text', ev.payload.message_id, ev.payload.reactions);
+        }
+    } else if (ev.type === "ROOM_DELETE_FILE_BROADCAST") {
+        const { message_id } = ev.payload;
+        const msgEl = document.querySelector(`[data-message-id="${message_id}"]`);
+        if (msgEl) {
+            msgEl.remove();
         }
     } else if (ev.type === "ROOM_REACTION_BROADCAST") {
         updateMessageReactions(ev.payload.message_id, ev.payload.reactions);

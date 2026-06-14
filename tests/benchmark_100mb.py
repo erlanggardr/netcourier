@@ -100,4 +100,4 @@ def benchmark_transfer(file_name):
         client.close()
 
 if __name__ == "__main__":
-    benchmark_transfer("test_500mb.bin")
+    benchmark_transfer("test_1gb.bin")

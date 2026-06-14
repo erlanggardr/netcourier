@@ -140,6 +140,10 @@ class Gateway:
 
     def _handle_client(self, conn, addr):
         self.logger.info(f"New client connection from {addr}")
+        try:
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as e:
+            self.logger.warning(f"Failed to set TCP_NODELAY on client socket: {e}")
         current_token = None
         try:
             with conn:
@@ -383,6 +387,10 @@ class Gateway:
 
     def _handle_backend(self, conn, addr):
         self.logger.info(f"New backend connection from {addr}")
+        try:
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as e:
+            self.logger.warning(f"Failed to set TCP_NODELAY on backend socket: {e}")
         current_server_id = None
         try:
             with conn:

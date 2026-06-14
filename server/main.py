@@ -64,6 +64,7 @@ class ProcessServer:
         self.running = False
         self.gateway_sock = None
         self.lock = threading.Lock()
+        self.transfer_progress = {}
 
     def start(self):
         self.running = True
@@ -94,6 +95,7 @@ class ProcessServer:
     def stop(self):
         self.logger.info(f"Stopping Process Server {self.server_id}...")
         self.running = False
+        self._flush_all_dirty_transfers()
         if self.gateway_sock:
             self.gateway_sock.close()
 
@@ -122,10 +124,57 @@ class ProcessServer:
         except Exception as e:
             self.logger.error(f"Error checking transfer timeouts: {e}")
 
+    def _flush_transfer_progress(self, transfer_id, db_conn=None):
+        with self.lock:
+            if transfer_id not in self.transfer_progress:
+                return
+            prog = self.transfer_progress[transfer_id]
+            if not prog.get("dirty"):
+                return
+            completed_chunks = prog["completed_chunks"]
+            bytes_transferred = prog["bytes_transferred"]
+            last_activity = prog["last_activity_at"]
+            
+        try:
+            if db_conn is None:
+                conn_context = get_db_connection()
+            else:
+                class DummyContext:
+                    def __init__(self, conn):
+                        self.conn = conn
+                    def __enter__(self):
+                        return self.conn
+                    def __exit__(self, exc_type, exc_val, exc_tb):
+                        pass
+                conn_context = DummyContext(db_conn)
+                
+            with conn_context as active_db:
+                cursor = active_db.cursor()
+                cursor.execute("""
+                    UPDATE file_transfers 
+                    SET completed_chunks = ?, 
+                        bytes_transferred = ?,
+                        last_activity_at = ?
+                    WHERE transfer_id = ?
+                """, (completed_chunks, bytes_transferred, last_activity, transfer_id))
+                active_db.commit()
+                
+            with self.lock:
+                if transfer_id in self.transfer_progress:
+                    self.transfer_progress[transfer_id]["dirty"] = False
+        except Exception as e:
+            self.logger.error(f"Failed to flush transfer progress for {transfer_id}: {e}")
+
+    def _flush_all_dirty_transfers(self):
+        transfer_ids = list(self.transfer_progress.keys())
+        for transfer_id in transfer_ids:
+            self._flush_transfer_progress(transfer_id)
+
     def _connect_to_gateway(self):
         try:
             self.gateway_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.gateway_sock.connect((self.gateway_host, self.gateway_port))
+            self.gateway_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             
             # Register backend
             reg_packet = build_packet("REGISTER_BACKEND", {
@@ -186,6 +235,10 @@ class ProcessServer:
             
             while self.running:
                 conn, addr = s.accept()
+                try:
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except Exception as e:
+                    self.logger.warning(f"Failed to set TCP_NODELAY on client socket: {e}")
                 threading.Thread(target=self._handle_client, args=(conn, addr), daemon=True).start()
 
     def _handle_client(self, conn, addr):
@@ -582,8 +635,15 @@ class ProcessServer:
             return
 
         try:
+            message_id = None
             with get_db_connection() as db_conn:
                 cursor = db_conn.cursor()
+                # Get the message_id of the file message
+                cursor.execute("SELECT message_id FROM room_messages WHERE message_type = 'file' AND content LIKE ? AND is_deleted = 0", (f'%\"file_id\": {file_id}%',))
+                row = cursor.fetchone()
+                if row:
+                    message_id = row["message_id"]
+
                 # Logical delete from files table
                 cursor.execute("UPDATE files SET status = 'deleted' WHERE file_id = ?", (file_id,))
                 # Logical delete from room_messages (the file card)
@@ -591,6 +651,15 @@ class ProcessServer:
                 db_conn.commit()
                 
             self._broadcast_system_event(room_name, f"A file was deleted by the owner.")
+            
+            if message_id:
+                broadcast_packet = build_packet("ROOM_DELETE_FILE_BROADCAST", {
+                    "room_name": room_name,
+                    "message_id": message_id,
+                    "file_id": file_id
+                })
+                self._broadcast_to_room(room_name, broadcast_packet)
+                
             send_packet(conn, build_packet("DELETE_FILE_OK", {"file_id": file_id}, request_id=req_id))
         except Exception as e:
             self.logger.error(f"Failed to delete file: {e}")
@@ -785,6 +854,10 @@ class ProcessServer:
                 stored_filename = f"{int(datetime.now().timestamp())}_{filename}"
                 stored_path = os.path.join(storage_dir, stored_filename)
                 
+                # Touch the file to ensure it exists for seek/out-of-order writes
+                with open(stored_path, "wb") as f:
+                    pass
+                
                 cursor.execute("""
                     INSERT INTO files (room_id, server_id, uploader_id, original_filename, stored_filename, stored_path, size_bytes, checksum_sha256, chunk_size, total_chunks, status, uploaded_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploading', ?)
@@ -811,48 +884,72 @@ class ProcessServer:
         chunk_index = payload.get("chunk_index")
         
         try:
-            with get_db_connection() as db_conn:
-                cursor = db_conn.cursor()
-                cursor.execute("""
-                    SELECT f.stored_path, f.chunk_size, ft.status, ft.total_chunks, ft.completed_chunks
-                    FROM file_transfers ft
-                    JOIN files f ON ft.file_id = f.file_id
-                    WHERE ft.transfer_id = ?
-                """, (transfer_id,))
-                row = cursor.fetchone()
-                if not row or row["status"] != "in_progress":
-                    send_packet(conn, build_error_packet("INVALID_PACKET", request_id=req_id))
-                    return
-                    
-                stored_path = row["stored_path"]
-                total_chunks = row["total_chunks"]
-                completed_chunks = row["completed_chunks"]
+            with self.lock:
+                if transfer_id not in self.transfer_progress:
+                    with get_db_connection() as db_conn:
+                        cursor = db_conn.cursor()
+                        cursor.execute("""
+                            SELECT f.stored_path, f.chunk_size, ft.status, ft.total_chunks, ft.completed_chunks, ft.bytes_transferred
+                            FROM file_transfers ft
+                            JOIN files f ON ft.file_id = f.file_id
+                            WHERE ft.transfer_id = ?
+                        """, (transfer_id,))
+                        row = cursor.fetchone()
+                        if not row or row["status"] != "in_progress":
+                            send_packet(conn, build_error_packet("INVALID_PACKET", request_id=req_id))
+                            return
+                        
+                        self.transfer_progress[transfer_id] = {
+                            "stored_path": row["stored_path"],
+                            "chunk_size": row["chunk_size"],
+                            "total_chunks": row["total_chunks"],
+                            "completed_chunks": row["completed_chunks"],
+                            "bytes_transferred": row["bytes_transferred"],
+                            "dirty": False,
+                            "last_activity_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
                 
-                with open(stored_path, "ab" if chunk_index > 0 else "wb") as f:
-                    f.write(binary_payload)
-                    
-                # Optimization: Update DB every 10 chunks or if it's the last chunk
-                new_completed = completed_chunks + 1
-                if new_completed % 10 == 0 or new_completed == total_chunks:
-                    cursor.execute("""
-                        UPDATE file_transfers 
-                        SET completed_chunks = ?, 
-                            bytes_transferred = bytes_transferred + ?,
-                            last_activity_at = ?
-                        WHERE transfer_id = ?
-                    """, (new_completed, len(binary_payload), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), transfer_id))
-                    db_conn.commit()
+                prog = self.transfer_progress[transfer_id]
+                stored_path = prog["stored_path"]
+                chunk_size = prog["chunk_size"]
+                total_chunks = prog["total_chunks"]
                 
-                send_packet(conn, build_packet("CHUNK_ACK", {
-                    "transfer_id": transfer_id,
-                    "chunk_index": chunk_index,
-                    "status": "received"
-                }, request_id=req_id))
+            if not os.path.exists(stored_path):
+                with open(stored_path, "wb") as f:
+                    pass
+                
+            offset = chunk_index * chunk_size
+            with open(stored_path, "r+b") as f:
+                f.seek(offset)
+                f.write(binary_payload)
+                
+            with self.lock:
+                prog = self.transfer_progress[transfer_id]
+                prog["completed_chunks"] += 1
+                prog["bytes_transferred"] += len(binary_payload)
+                prog["last_activity_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                prog["dirty"] = True
+                
+                completed_chunks = prog["completed_chunks"]
+                should_flush = (chunk_index == 0 or completed_chunks % 20 == 0 or chunk_index + 1 == total_chunks)
+                
+            if should_flush:
+                self._flush_transfer_progress(transfer_id)
+                
+            send_packet(conn, build_packet("CHUNK_ACK", {
+                "transfer_id": transfer_id,
+                "chunk_index": chunk_index,
+                "status": "received"
+            }, request_id=req_id))
         except Exception as e:
             self.logger.error(f"Upload chunk failed: {e}")
+            send_packet(conn, build_error_packet("INTERNAL_ERROR", request_id=req_id))
 
     def _handle_upload_finish(self, conn, req_id, payload):
         transfer_id = payload.get("transfer_id")
+        
+        # Flush transfer progress to DB first
+        self._flush_transfer_progress(transfer_id)
         
         try:
             with get_db_connection() as db_conn:
@@ -878,6 +975,11 @@ class ProcessServer:
                         cursor.execute("UPDATE file_transfers SET status = 'completed' WHERE transfer_id = ?", (transfer_id,))
                         db_conn.commit()
                         
+                        # Clean up cache
+                        with self.lock:
+                            if transfer_id in self.transfer_progress:
+                                del self.transfer_progress[transfer_id]
+                        
                         send_packet(conn, build_packet("UPLOAD_SUCCESS", {
                             "transfer_id": transfer_id
                         }, request_id=req_id))
@@ -893,21 +995,17 @@ class ProcessServer:
                             # Also broadcast as a file chat message
                             import json
                             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            file_msg_content = json.dumps({
-                                "file_id": row["file_id"],
-                                "filename": row["original_filename"],
-                                "size_bytes": row["size_bytes"] if "size_bytes" in row.keys() else 0
-                            })
                             
                             # Re-fetch size_bytes to be safe
                             cursor.execute("SELECT size_bytes FROM files WHERE file_id = ?", (row["file_id"],))
                             size_row = cursor.fetchone()
-                            if size_row:
-                                file_msg_content = json.dumps({
-                                    "file_id": row["file_id"],
-                                    "filename": row["original_filename"],
-                                    "size_bytes": size_row["size_bytes"]
-                                })
+                            size_bytes = size_row["size_bytes"] if size_row else 0
+                            
+                            file_msg_content = json.dumps({
+                                "file_id": row["file_id"],
+                                "filename": row["original_filename"],
+                                "size_bytes": size_bytes
+                            })
                             
                             cursor.execute("""
                                 INSERT INTO room_messages (room_id, server_id, sender_id, sender_username, message_type, content, created_at)
@@ -970,6 +1068,9 @@ class ProcessServer:
     def _handle_resume_transfer(self, conn, req_id, payload):
         transfer_id = payload.get("transfer_id")
         direction = payload.get("direction")
+        
+        # Flush transfer progress for this transfer_id to DB first
+        self._flush_transfer_progress(transfer_id)
         
         user_info = self.clients.get(conn)
         if not user_info:
@@ -1043,6 +1144,7 @@ class ProcessServer:
             self.logger.error(f"Failed to push download chunks: {e}")
 
     def _cleanup_client(self, conn):
+        self._flush_all_dirty_transfers()
         room_to_broadcast = None
         username_left = None
         

@@ -108,12 +108,14 @@ class TestPhase7(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.room_name = f"TestRoomPhase7_{int(time.time())}"
+        cls.test_dir = "tests/uploadbinarytest"
         cls.test_files = ["test_1mb.bin", "test_5mb.bin", "test_10mb.bin"]
         sizes = [1, 5, 10]
         # Dummy file creation
         for i, file_name in enumerate(cls.test_files):
-            if not os.path.exists(file_name):
-                with open(file_name, "wb") as f:
+            file_path = os.path.join(cls.test_dir, file_name)
+            if not os.path.exists(file_path):
+                with open(file_path, "wb") as f:
                     f.write(os.urandom(sizes[i] * 1024 * 1024))
                 
     def test_01_upload_download_all_sizes(self):
@@ -125,6 +127,7 @@ class TestPhase7(unittest.TestCase):
         self.assertTrue(client_a.connect_room_server(self.room_name))
         
         for test_file in self.test_files:
+            file_path = os.path.join(self.test_dir, test_file)
             with self.subTest(file=test_file):
                 print(f"\n--- Testing Transfer for {test_file} ---")
                 # Reset downloaded chunks for each file
@@ -132,11 +135,11 @@ class TestPhase7(unittest.TestCase):
                 
                 # Calculate Checksum
                 sha256 = hashlib.sha256()
-                with open(test_file, "rb") as f:
+                with open(file_path, "rb") as f:
                     for chunk in iter(lambda: f.read(65536), b""):
                         sha256.update(chunk)
                 checksum = sha256.hexdigest()
-                filesize = os.path.getsize(test_file)
+                filesize = os.path.getsize(file_path)
                 chunk_size = 65536
                 total_chunks = (filesize + chunk_size - 1) // chunk_size
                 
@@ -158,7 +161,7 @@ class TestPhase7(unittest.TestCase):
                 
                 # 2. UPLOAD_CHUNK
                 print(f"Uploading {total_chunks} chunks...")
-                with open(test_file, "rb") as f:
+                with open(file_path, "rb") as f:
                     for i in range(total_chunks):
                         chunk_data = f.read(chunk_size)
                         packet = build_packet("UPLOAD_CHUNK", {"transfer_id": transfer_id, "chunk_index": i}, token=client_a.token)

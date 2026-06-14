@@ -22,6 +22,7 @@ class RoomConnection:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.running = True
             
             self.receiver_thread = threading.Thread(target=self._receive_loop, daemon=True)
@@ -101,6 +102,9 @@ class RoomConnection:
 
         if msg_type == "ROOM_CHAT_BROADCAST":
             self.app.run_in_ui(self.app.on_room_message, payload)
+        elif msg_type == "ROOM_DELETE_FILE_BROADCAST":
+            if hasattr(self.app, "on_room_delete_file"):
+                self.app.run_in_ui(self.app.on_room_delete_file, payload)
         elif msg_type == "ROOM_REACTION_BROADCAST":
             self.app.run_in_ui(self.app.on_room_reaction, payload)
         elif msg_type == "ROOM_TYPING_BROADCAST":

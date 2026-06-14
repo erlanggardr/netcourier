@@ -28,6 +28,9 @@ class MockApp:
     def on_room_message(self, payload):
         self.session.push_event({"type": "ROOM_MESSAGE", "payload": payload})
         
+    def on_room_delete_file(self, payload):
+        self.session.push_event({"type": "ROOM_DELETE_FILE_BROADCAST", "payload": payload})
+        
     def on_room_reaction(self, payload):
         self.session.push_event({"type": "ROOM_REACTION_BROADCAST", "payload": payload})
         
@@ -51,10 +54,10 @@ class MockApp:
         self.session.push_event({"type": "ERROR", "message": message})
 
 class WebSession:
-    def __init__(self, session_id):
+    def __init__(self, session_id, gateway_host=DEFAULT_GATEWAY_HOST, gateway_port=DEFAULT_GATEWAY_CLIENT_PORT):
         self.session_id = session_id
         self.app = MockApp(self)
-        self.gateway_conn = GatewayConnection(DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT, self.app)
+        self.gateway_conn = GatewayConnection(gateway_host, gateway_port, self.app)
         self.room_conn = None
         self.events = []
         self.lock = threading.Lock()
@@ -77,9 +80,11 @@ class WebSession:
             return events_to_return
 
 class WebServer:
-    def __init__(self, host='0.0.0.0', port=8080):
+    def __init__(self, host='0.0.0.0', port=8080, gateway_host=DEFAULT_GATEWAY_HOST, gateway_port=DEFAULT_GATEWAY_CLIENT_PORT):
         self.host = host
         self.port = port
+        self.gateway_host = gateway_host
+        self.gateway_port = gateway_port
         self.sessions = {}
         self.running = False
         
@@ -101,25 +106,28 @@ class WebServer:
 
     def handle_client(self, conn, addr):
         try:
+            try:
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except Exception as e:
+                pass
             req = b""
+            # Increase header reading buffer and limit (1GB body limit)
+            MAX_HEADER_SIZE = 65536
             while b"\r\n\r\n" not in req:
-                chunk = conn.recv(4096)
+                chunk = conn.recv(8192)
                 if not chunk:
                     break
                 req += chunk
-                if len(req) > 1024 * 1024 * 10: # 10MB limit
+                if len(req) > MAX_HEADER_SIZE:
                     break
             
-            if not req:
+            if not req or b"\r\n\r\n" not in req:
                 conn.close()
                 return
 
             headers_part, body_part = req.split(b"\r\n\r\n", 1)
             lines = headers_part.decode('utf-8', errors='ignore').split("\r\n")
-            if not lines or not lines[0]:
-                conn.close()
-                return
-                
+            
             request_line = lines[0]
             parts = request_line.split(" ")
             if len(parts) < 2:
@@ -135,9 +143,16 @@ class WebServer:
                     headers[k.strip().lower()] = v.strip()
                     
             content_length = int(headers.get("content-length", 0))
+            
+            # Optimization: 1GB Body Limit
+            if content_length > 1024 * 1024 * 1024:
+                self.send_response(conn, 413, {"error": "Request entity too large"})
+                return
+
             body = body_part
+            # Fast body reading with 64KB chunks
             while len(body) < content_length:
-                chunk = conn.recv(4096)
+                chunk = conn.recv(65536)
                 if not chunk:
                     break
                 body += chunk
@@ -215,10 +230,14 @@ class WebServer:
                 qs_params[k] = v[0]
 
         if path_only.startswith("/api/"):
-            try:
-                json_body = json.loads(body.decode('utf-8')) if body else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                json_body = {}
+            # Bypass UTF-8 body decoding for binary files/upload chunks to optimize performance
+            is_upload = (path_only == "/api/rooms/files/upload")
+            json_body = {}
+            if body and not is_upload:
+                try:
+                    json_body = json.loads(body.decode('utf-8'))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    json_body = {}
                 
             self.handle_api(conn, method, path_only, headers, json_body, qs_params, raw_body=body)
         else:
@@ -253,7 +272,7 @@ class WebServer:
         if path == "/api/register" and method == "POST":
             # Temporarily use a fresh session to register
             try:
-                temp_session = WebSession("temp-" + str(uuid.uuid4()))
+                temp_session = WebSession("temp-" + str(uuid.uuid4()), self.gateway_host, self.gateway_port)
                 resp = self._sync_request(temp_session.gateway_conn, "REGISTER", body)
                 temp_session.gateway_conn.disconnect()
                 if resp and resp.get("type") == "REGISTER_OK":
@@ -267,7 +286,7 @@ class WebServer:
         if path == "/api/login" and method == "POST":
             session_id = str(uuid.uuid4())
             try:
-                new_session = WebSession(session_id)
+                new_session = WebSession(session_id, self.gateway_host, self.gateway_port)
                 resp = self._sync_request(new_session.gateway_conn, "LOGIN", body)
                 if resp and resp.get("type") == "LOGIN_OK":
                     new_session.app.token = resp.get("token")
@@ -458,89 +477,165 @@ class WebServer:
                 return
             room_name = qs.get("room_name")
             filename = qs.get("filename")
-            # For Resuming:
-            existing_transfer_id = qs.get("transfer_id")
-            start_chunk = int(qs.get("start_chunk", 0))
+            action = qs.get("action")
 
             if not room_name or not filename:
                 self.send_response(conn, 400, {"error": "Missing params"})
                 return
 
-            import hashlib
-            filesize = len(raw_body) + (start_chunk * 1024 * 1024 if start_chunk > 0 else 0)
-            chunk_size = 1024 * 1024
-            total_chunks = (filesize + chunk_size - 1) // chunk_size
-            
-            # We only sha256 full files for now, if resuming we trust existing checksum
-            sha256 = ""
-            if start_chunk == 0:
-                sha256 = hashlib.sha256(raw_body).hexdigest()
+            chunk_size = 1024 * 1024 # 1MB chunk size
 
-            if not existing_transfer_id:
-                init_resp = self._sync_request(session.room_conn, "UPLOAD_INIT", {
-                    "room_name": room_name,
-                    "filename": filename,
-                    "filesize": filesize,
-                    "chunk_size": chunk_size,
-                    "total_chunks": total_chunks,
-                    "checksum_sha256": sha256
-                })
-
-                if not init_resp or init_resp.get("type") != "UPLOAD_READY":
-                    self.send_response(conn, 400, {"error": f"Upload init failed: {init_resp.get('payload', {}).get('message') if init_resp else 'Timeout'}"})
-                    return
-                transfer_id = init_resp["payload"]["transfer_id"]
-            else:
-                transfer_id = int(existing_transfer_id)
-
-            # Upload provided raw_body as chunks starting from start_chunk
-            for i in range(len(raw_body) // chunk_size + (1 if len(raw_body) % chunk_size > 0 else 0)):
-                current_chunk_idx = start_chunk + i
-                chunk_data = raw_body[i*chunk_size : (i+1)*chunk_size]
-                chunk_payload = {
-                    "transfer_id": transfer_id,
-                    "chunk_index": current_chunk_idx,
-                    "chunk_size": len(chunk_data)
-                }
-                import struct
-                from common.protocol import build_packet
-                packet = build_packet("UPLOAD_CHUNK", chunk_payload, token=session.app.token)
-                packet["payload_size"] = len(chunk_data)
-                header_json = json.dumps(packet).encode('utf-8')
-                
-                ev = threading.Event()
-                ack_res = {}
-                def cb(h):
-                    ack_res["h"] = h
-                    ev.set()
-                
-                with session.room_conn.lock:
-                    session.room_conn.pending_requests[packet["request_id"]] = cb
-                
-                session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
-                
-                if not ev.wait(10):
-                    self.send_response(conn, 400, {"error": f"Chunk {current_chunk_idx} timeout"})
-                    return
-                
-                ack = ack_res.get("h")
-                if not ack or ack.get("type") != "CHUNK_ACK":
-                    self.send_response(conn, 400, {"error": f"Chunk {current_chunk_idx} failed"})
-                    return
-
-            finish_resp = self._sync_request(session.room_conn, "UPLOAD_FINISH", {"transfer_id": transfer_id})
-            if finish_resp and finish_resp.get("type") == "UPLOAD_SUCCESS":
-                self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
-            else:
-                # If we didn't finish the whole file (due to slicing/pausing), it's not success yet
-                # But Web API current flow finishes after the POST ends.
-                # Since app.js sends the *remainder* of the file, we can finish if it was the last part.
-                if finish_resp and finish_resp.get("type") == "ERROR":
-                     # Likely not finished yet if we sliced
-                     self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id, "status": "partial"})
-                else:
+            # 1. Chunked Upload Flow
+            if action:
+                if action == "init":
+                    filesize = int(qs.get("filesize", 0))
+                    checksum = qs.get("checksum_sha256", "")
+                    total_chunks = (filesize + chunk_size - 1) // chunk_size if filesize > 0 else 0
+                    
+                    init_resp = self._sync_request(session.room_conn, "UPLOAD_INIT", {
+                        "room_name": room_name,
+                        "filename": filename,
+                        "filesize": filesize,
+                        "chunk_size": chunk_size,
+                        "total_chunks": total_chunks,
+                        "checksum_sha256": checksum
+                    })
+                    
+                    if not init_resp or init_resp.get("type") != "UPLOAD_READY":
+                        self.send_response(conn, 400, {"error": f"Upload init failed: {init_resp.get('payload', {}).get('message') if init_resp else 'Timeout'}"})
+                        return
+                    
+                    transfer_id = init_resp["payload"]["transfer_id"]
                     self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
-            return
+                    return
+
+                elif action == "chunk":
+                    transfer_id = int(qs.get("transfer_id", 0))
+                    chunk_index = int(qs.get("chunk_index", 0))
+                    
+                    chunk_payload = {
+                        "transfer_id": transfer_id,
+                        "chunk_index": chunk_index,
+                        "chunk_size": len(raw_body)
+                    }
+                    import struct
+                    from common.protocol import build_packet
+                    packet = build_packet("UPLOAD_CHUNK", chunk_payload, token=session.app.token)
+                    packet["payload_size"] = len(raw_body)
+                    header_json = json.dumps(packet).encode('utf-8')
+                    
+                    ev = threading.Event()
+                    ack_res = {}
+                    def cb(h):
+                        ack_res["h"] = h
+                        ev.set()
+                    
+                    with session.room_conn.lock:
+                        session.room_conn.pending_requests[packet["request_id"]] = cb
+                    
+                    try:
+                        session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + raw_body)
+                    except Exception as e:
+                        self.send_response(conn, 500, {"error": f"Socket send error: {e}"})
+                        return
+                    
+                    if not ev.wait(30):
+                        self.send_response(conn, 400, {"error": f"Chunk {chunk_index} timeout"})
+                        return
+                    
+                    ack = ack_res.get("h")
+                    if not ack or ack.get("type") != "CHUNK_ACK":
+                        self.send_response(conn, 400, {"error": f"Chunk {chunk_index} failed"})
+                        return
+                        
+                    self.send_response(conn, 200, {"success": True})
+                    return
+
+                elif action == "finish":
+                    transfer_id = int(qs.get("transfer_id", 0))
+                    finish_resp = self._sync_request(session.room_conn, "UPLOAD_FINISH", {"transfer_id": transfer_id})
+                    if finish_resp and finish_resp.get("type") == "UPLOAD_SUCCESS":
+                        self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
+                    else:
+                        self.send_response(conn, 400, {"error": "Upload finish failed"})
+                    return
+
+                else:
+                    self.send_response(conn, 400, {"error": f"Invalid action: {action}"})
+                    return
+
+            # 2. Legacy / Full-file Upload Flow (for backward compatibility if any)
+            else:
+                existing_transfer_id = qs.get("transfer_id")
+                start_chunk = int(qs.get("start_chunk", 0))
+                import hashlib
+                filesize = len(raw_body) + (start_chunk * chunk_size if start_chunk > 0 else 0)
+                total_chunks = (filesize + chunk_size - 1) // chunk_size
+                
+                sha256 = ""
+                if start_chunk == 0:
+                    sha256 = hashlib.sha256(raw_body).hexdigest()
+
+                if not existing_transfer_id:
+                    init_resp = self._sync_request(session.room_conn, "UPLOAD_INIT", {
+                        "room_name": room_name,
+                        "filename": filename,
+                        "filesize": filesize,
+                        "chunk_size": chunk_size,
+                        "total_chunks": total_chunks,
+                        "checksum_sha256": sha256
+                    })
+
+                    if not init_resp or init_resp.get("type") != "UPLOAD_READY":
+                        self.send_response(conn, 400, {"error": f"Upload init failed: {init_resp.get('payload', {}).get('message') if init_resp else 'Timeout'}"})
+                        return
+                    transfer_id = init_resp["payload"]["transfer_id"]
+                else:
+                    transfer_id = int(existing_transfer_id)
+
+                for i in range(len(raw_body) // chunk_size + (1 if len(raw_body) % chunk_size > 0 else 0)):
+                    current_chunk_idx = start_chunk + i
+                    chunk_data = raw_body[i*chunk_size : (i+1)*chunk_size]
+                    chunk_payload = {
+                        "transfer_id": transfer_id,
+                        "chunk_index": current_chunk_idx,
+                        "chunk_size": len(chunk_data)
+                    }
+                    import struct
+                    from common.protocol import build_packet
+                    packet = build_packet("UPLOAD_CHUNK", chunk_payload, token=session.app.token)
+                    packet["payload_size"] = len(chunk_data)
+                    header_json = json.dumps(packet).encode('utf-8')
+                    
+                    ev = threading.Event()
+                    ack_res = {}
+                    def cb(h):
+                        ack_res["h"] = h
+                        ev.set()
+                    
+                    with session.room_conn.lock:
+                        session.room_conn.pending_requests[packet["request_id"]] = cb
+                    
+                    session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
+                    
+                    if not ev.wait(10):
+                        self.send_response(conn, 400, {"error": f"Chunk {current_chunk_idx} timeout"})
+                        return
+                    
+                    ack = ack_res.get("h")
+                    if not ack or ack.get("type") != "CHUNK_ACK":
+                        self.send_response(conn, 400, {"error": f"Chunk {current_chunk_idx} failed"})
+                        return
+
+                finish_resp = self._sync_request(session.room_conn, "UPLOAD_FINISH", {"transfer_id": transfer_id})
+                if finish_resp and finish_resp.get("type") == "UPLOAD_SUCCESS":
+                    self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
+                else:
+                    if finish_resp and finish_resp.get("type") == "ERROR":
+                         self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id, "status": "partial"})
+                    else:
+                         self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
+                return
 
         if path == "/api/rooms/files/download" and method == "GET":
             if not session.room_conn:
@@ -559,30 +654,54 @@ class WebServer:
             total_chunks = dl_resp["payload"]["total_chunks"]
             transfer_id = dl_resp["payload"]["transfer_id"]
             
-            # Wait to gather chunks (MockApp needs to handle it or we intercept)
-            # Since RoomConnection parses DOWNLOAD_CHUNK, we can temporarily monkey-patch MockApp
-            downloaded_chunks = {}
+            # Send HTTP chunked response headers
+            response_headers = "HTTP/1.1 200 OK\r\n"
+            response_headers += "Content-Type: application/octet-stream\r\n"
+            response_headers += "Transfer-Encoding: chunked\r\n"
+            response_headers += "Access-Control-Allow-Origin: *\r\n"
+            response_headers += "Access-Control-Allow-Headers: Content-Type, Authorization, Session-Id\r\n"
+            response_headers += "\r\n"
+            
+            try:
+                conn.sendall(response_headers.encode('utf-8'))
+            except Exception as e:
+                print(f"Failed to send download headers: {e}")
+                return
+            
             ev = threading.Event()
+            error_occurred = [False]
             
-            def on_chunk(chunk_index, data):
-                downloaded_chunks[chunk_index] = data
-                if len(downloaded_chunks) == total_chunks:
-                    ev.set()
-                    
-            # Setup fake downloader interface
-            class FakeDownloader:
+            class StreamDownloader:
+                def __init__(self):
+                    self.expected_chunk = 0
+                
                 def handle_chunk(self, idx, data):
-                    on_chunk(idx, data)
-            session.app.active_downloader = FakeDownloader()
+                    if error_occurred[0]:
+                        return
+                    try:
+                        # Write the chunk in HTTP chunked encoding format
+                        chunk_header = f"{len(data):X}\r\n".encode('utf-8')
+                        conn.sendall(chunk_header + data + b"\r\n")
+                        self.expected_chunk += 1
+                        if self.expected_chunk >= total_chunks:
+                            ev.set()
+                    except Exception as e:
+                        print(f"Error streaming download chunk: {e}")
+                        error_occurred[0] = True
+                        ev.set()
             
-            ev.wait(30) # wait up to 30s
+            session.app.active_downloader = StreamDownloader()
+            
+            # Wait up to 5 minutes for streaming to complete
+            ev.wait(300)
             session.app.active_downloader = None
             
-            if len(downloaded_chunks) == total_chunks:
-                file_bytes = b"".join(downloaded_chunks[i] for i in range(total_chunks))
-                self.send_response(conn, 200, file_bytes, "application/octet-stream")
-            else:
-                self.send_response(conn, 500, {"error": "Download timeout"})
+            if not error_occurred[0]:
+                try:
+                    # Send ending chunk
+                    conn.sendall(b"0\r\n\r\n")
+                except:
+                    pass
             return
 
         self.send_response(conn, 404, {"error": "Not Found"})

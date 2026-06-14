@@ -495,12 +495,12 @@ Disediakan script simulasi:
 
 ## 5.5 Usability
 
-- UI Tkinter mudah digunakan dan tidak bergantung pada CLI/TUI.
+- Web UI mudah digunakan di browser dan tidak bergantung pada CLI/TUI.
 - Ada menu/help dialog untuk daftar fitur dan cara penggunaan.
-- Error message jelas melalui label status atau messagebox.
-- Progress transfer tampil menggunakan progress bar.
+- Error message jelas melalui label status atau modal dialog.
+- Progress transfer tampil menggunakan progress bar berbasis web.
 - Tampilan waiting room dan room chat terlihat berbeda.
-- Operasi socket tidak boleh mem-freeze GUI; gunakan worker thread dan UI event queue.
+- Operasi socket tidak boleh mem-freeze GUI browser; gunakan asinkronus call (fetch) dan event queue di API bridge.
 
 ---
 

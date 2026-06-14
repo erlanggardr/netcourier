@@ -1,1 +1,1 @@
-"""Tkinter client package."""
+"""NetCourier client package."""

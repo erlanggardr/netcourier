@@ -298,16 +298,16 @@ Saat demo, lakukan:
 
 ---
 
-## Tkinter UI Test
+## Web UI Test
 
-- [ ] Aplikasi client dapat dibuka dengan `python client/main.py`.
-- [ ] Login/register dapat dilakukan melalui form Tkinter.
+- [ ] Aplikasi client dapat dijalankan dengan `python client/main.py` dan diakses di browser.
+- [ ] Login/register dapat dilakukan melalui form di halaman web.
 - [ ] Waiting Room menampilkan online user list, room list, PM panel, dan status bar.
 - [ ] User dapat membuat room melalui form Create Room.
 - [ ] User dapat join room melalui tombol Join Room.
-- [ ] Room window/panel menampilkan chat history, room members, file list, dan transfer panel.
-- [ ] PM tetap masuk saat user sedang berada di room.
-- [ ] Upload file menggunakan file picker.
-- [ ] Progress upload/download tampil menggunakan progress bar.
-- [ ] GUI tidak freeze saat load test ringan, upload/download, atau menerima banyak pesan.
-- [ ] Socket worker thread tidak mengubah widget langsung; update UI dilakukan lewat queue dan `root.after`.
+- [ ] Room area menampilkan chat history, room members, file list, dan transfer panel.
+- [ ] PM tetap masuk saat user sedang berada di room (via `/api/events`).
+- [ ] Upload file dapat diproses menggunakan web file selector.
+- [ ] Progress upload/download tampil menggunakan progress bar berbasis web.
+- [ ] GUI browser tidak freeze saat load test ringan, upload/download, atau menerima banyak pesan.
+- [ ] Komunikasi asinkronus ke server web berjalan tanpa race conditions.

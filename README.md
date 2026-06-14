@@ -47,31 +47,22 @@ NetCourier memisahkan komunikasi menjadi dua jenis:
 
 Client dapat tetap menerima private message walaupun sedang berada di dalam room, karena client menjaga koneksi ke Gateway selama aplikasi berjalan.
 
-UI utama NetCourier menggunakan **Tkinter desktop GUI**, bukan CLI/TUI. Input user dilakukan melalui form, tombol, list, tab, dan file picker. CLI hanya boleh digunakan untuk menjalankan proses server/gateway dan script testing, bukan sebagai UI client utama.
+UI utama NetCourier menggunakan **Web-based UI** (Single Page HTML/JS) yang dihubungkan ke server TCP via **HTTP & JSON API Bridge** di `web_api/server.py`. Pengguna mengakses aplikasi dengan membuka browser ke server HTTP lokal.
 
 ---
 
 ## 2. Arsitektur Ringkas
 
 ```txt
-Tkinter Desktop Client
+Web Client (Browser)
    |
-   | TCP Socket A: login, PM, online user, room directory
+   | HTTP REST / JSON API & SSE / Long-Polling
    v
-Gateway / Auth Server / Load Balancer
+Web API Server / HTTP Bridge (client/main.py)
    |
-   | TCP control + database access
-   v
-Central Database
-
-Tkinter Desktop Client
+   +--- TCP Socket A: login, PM, online user, room directory ---> Gateway
    |
-   | TCP Socket B: room chat, file transfer
-   v
-Process Server S1 / Process Server S2
-   |
-   v
-Central Database + Local File Storage
+   +--- TCP Socket B: room chat, file transfer -----------------> Process Server (S1/S2)
 ```
 
 ---
@@ -80,7 +71,8 @@ Central Database + Local File Storage
 
 | Komponen | Tugas |
 |---|---|
-| Tkinter Desktop Client | GUI user, login, PM, join room, room chat, upload/download file |
+| Web Client (Browser) | Web UI user, login, PM, join room, room chat, upload/download file |
+| Web API / HTTP Bridge | Jembatan penerjemah request HTTP/JSON ke koneksi TCP socket Gateway & Process Server |
 | Gateway | Auth, session, PM global, online user, room directory, load balancing |
 | Process Server | Room chat, broadcast, file transfer, chunking, checksum, resume |
 | Central Database | Users, sessions, rooms, chat history, PM history, file metadata, logs |
@@ -101,8 +93,8 @@ Central Database + Local File Storage
 | Password hashing | `hashlib.pbkdf2_hmac` atau `bcrypt` jika tersedia |
 | Checksum file | SHA-256 |
 | Logging | Python `logging` |
-| UI | Tkinter desktop GUI |
-| UI modules | `tkinter`, `ttk`, `filedialog`, `messagebox`, `queue` |
+| UI | Web-based HTML/CSS/JS (SPA) |
+| UI modules | Vanilla HTML/CSS/JS, Web API Server HTTP, long-polling /api/events |
 
 ---
 
@@ -128,16 +120,14 @@ netcourier/
 │   └── storage_service.py
 │
 ├── client/
-│   ├── main.py
-│   ├── app.py
-│   ├── gateway_connection.py
-│   ├── room_connection.py
-│   ├── auth_view.py
-│   ├── waiting_view.py
-│   ├── room_view.py
-│   ├── widgets.py
-│   ├── uploader.py
-│   └── downloader.py
+│   ├── main.py (Web API & UI Server launcher)
+│   ├── gateway_connection.py (Gateway socket helper)
+│   └── room_connection.py (Room server socket helper)
+├── web_ui/
+│   ├── index.html
+│   └── app.js
+├── web_api/
+│   └── server.py (Custom HTTP Server / TCP Bridge)
 │
 ├── common/
 │   ├── protocol.py
@@ -192,20 +182,21 @@ python gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
 ### Terminal 2: Process Server S1
 
 ```bash
-python server/server.py --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
+python server/main.py --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
 ```
 
 ### Terminal 3: Process Server S2
 
 ```bash
-python server/server.py --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
+python server/main.py --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
 ```
 
-### Terminal 4 dst: Client
+### Terminal 4 dst: Client (Web Server)
 
 ```bash
-python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000
+python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000 --port 8080
 ```
+Akses Web UI di browser Anda melalui tautan `http://localhost:8080`.
 
 ---
 
@@ -219,7 +210,7 @@ python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000
 6. Process Server: room chat.
 7. Process Server: file transfer.
 8. Reliable transfer: chunking, checksum, resume.
-9. Tkinter GUI integration, receiver thread, and UI-safe event queue.
+9. Web UI integration and HTTP-to-TCP API bridge.
 10. Testing: latency, throughput, load test.
 11. Dokumentasi dan video demo.
 

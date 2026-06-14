@@ -98,7 +98,7 @@ def test_resume_upload():
         srv_sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
         
         # Wait for CHUNK_ACK
-        receive_packet(srv_sock)
+        wait_for_packet(srv_sock, "CHUNK_ACK")
         
     print(f"Sent {half_chunks} chunks. Disconnecting...")
     srv_sock.close()
@@ -117,7 +117,7 @@ def test_resume_upload():
         "direction": "upload"
     }, token=token))
     
-    header, _ = receive_packet(srv_sock)
+    header, _ = wait_for_packet(srv_sock, "UPLOAD_READY")
     assert header["type"] == "UPLOAD_READY"
     resume_start_chunk = header["payload"]["start_chunk"]
     print(f"Resuming from chunk {resume_start_chunk}")
@@ -133,14 +133,14 @@ def test_resume_upload():
         packet["payload_size"] = len(chunk_data)
         header_json = json.dumps(packet).encode('utf-8')
         srv_sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
-        receive_packet(srv_sock)
+        wait_for_packet(srv_sock, "CHUNK_ACK")
         
     # 9. Finish Upload
     send_packet(srv_sock, build_packet("UPLOAD_FINISH", {
         "transfer_id": transfer_id
     }, token=token))
     
-    header, _ = receive_packet(srv_sock)
+    header, _ = wait_for_packet(srv_sock, "UPLOAD_SUCCESS")
     assert header["type"] == "UPLOAD_SUCCESS", f"Upload failed: {header}"
     print("Upload completed successfully after resume!")
     
@@ -160,9 +160,9 @@ def test_resume_download(server_host, server_port, token, original_sha256, gw_so
     send_packet(srv_sock, build_packet("FILE_LIST_REQUEST", {
         "room_name": "General"
     }, token=token))
-    header, _ = receive_packet(srv_sock)
+    header, _ = wait_for_packet(srv_sock, "FILE_LIST_RESPONSE")
     files = header["payload"]["files"]
-    target_file = next(f for f in files if f["original_filename"] == "test_resume.bin")
+    target_file = max((f for f in files if f["original_filename"] == "test_resume.bin"), key=lambda x: x["file_id"])
     file_id = target_file["file_id"]
     
     # 2. Initiate Download
@@ -170,7 +170,7 @@ def test_resume_download(server_host, server_port, token, original_sha256, gw_so
         "file_id": file_id
     }, token=token))
     
-    header, _ = receive_packet(srv_sock)
+    header, _ = wait_for_packet(srv_sock, "DOWNLOAD_READY")
     transfer_id = header["payload"]["transfer_id"]
     total_chunks = header["payload"]["total_chunks"]
     print(f"Download initiated. Transfer ID: {transfer_id}, Total chunks: {total_chunks}")
@@ -180,7 +180,7 @@ def test_resume_download(server_host, server_port, token, original_sha256, gw_so
     received_data = bytearray()
     
     for i in range(half_chunks):
-        chunk_header, chunk_payload = receive_packet(srv_sock)
+        chunk_header, chunk_payload = wait_for_packet(srv_sock, "DOWNLOAD_CHUNK")
         assert chunk_header["type"] == "DOWNLOAD_CHUNK"
         received_data.extend(chunk_payload)
         
@@ -202,13 +202,13 @@ def test_resume_download(server_host, server_port, token, original_sha256, gw_so
         "start_chunk": half_chunks
     }, token=token))
     
-    header, _ = receive_packet(srv_sock)
+    header, _ = wait_for_packet(srv_sock, "DOWNLOAD_READY")
     assert header["type"] == "DOWNLOAD_READY"
     print(f"Resuming download from chunk {half_chunks}")
     
     # 6. Receive remaining chunks
     for i in range(half_chunks, total_chunks):
-        chunk_header, chunk_payload = receive_packet(srv_sock)
+        chunk_header, chunk_payload = wait_for_packet(srv_sock, "DOWNLOAD_CHUNK")
         assert chunk_header["type"] == "DOWNLOAD_CHUNK"
         received_data.extend(chunk_payload)
         

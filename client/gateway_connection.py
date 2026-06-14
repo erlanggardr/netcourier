@@ -23,6 +23,7 @@ class GatewayConnection:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.running = True
             
             self.receiver_thread = threading.Thread(target=self._receive_loop, daemon=True)
