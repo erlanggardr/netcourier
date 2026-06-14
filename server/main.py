@@ -169,6 +169,13 @@ class ProcessServer:
         transfer_ids = list(self.transfer_progress.keys())
         for transfer_id in transfer_ids:
             self._flush_transfer_progress(transfer_id)
+            with self.lock:
+                prog = self.transfer_progress.get(transfer_id)
+                if prog and "file_handle" in prog:
+                    try:
+                        prog["file_handle"].close()
+                    except:
+                        pass
 
     def _connect_to_gateway(self):
         try:
@@ -922,7 +929,11 @@ class ProcessServer:
                     pass
                 
             offset = chunk_index * chunk_size
-            with open(stored_path, "r+b") as f:
+            with self.lock:
+                prog = self.transfer_progress[transfer_id]
+                if "file_handle" not in prog or prog["file_handle"].closed:
+                    prog["file_handle"] = open(stored_path, "r+b")
+                f = prog["file_handle"]
                 f.seek(offset)
                 f.write(binary_payload)
                 
@@ -950,6 +961,15 @@ class ProcessServer:
 
     def _handle_upload_finish(self, conn, req_id, payload):
         transfer_id = payload.get("transfer_id")
+        
+        # Close open file handle if any
+        with self.lock:
+            prog = self.transfer_progress.get(transfer_id)
+            if prog and "file_handle" in prog:
+                try:
+                    prog["file_handle"].close()
+                except:
+                    pass
         
         # Flush transfer progress to DB first
         self._flush_transfer_progress(transfer_id)
