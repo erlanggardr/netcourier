@@ -12,7 +12,7 @@ class UploadQueue {
         this.queue = [];
         this.activeCount = 0;
         this.maxConcurrent = maxConcurrent;
-        this.transfers = new Map(); // id -> { file, progress, status }
+        this.transfers = new Map(); // id -> { file, progress, status, xhr, controller }
         this.container = null;
     }
 
@@ -22,7 +22,7 @@ class UploadQueue {
 
     add(file, roomName) {
         const id = Math.random().toString(36).substr(2, 9);
-        const item = { id, file, roomName, progress: 0, status: 'queued' };
+        const item = { id, file, roomName, progress: 0, status: 'queued', xhr: null };
         this.queue.push(item);
         this.transfers.set(id, item);
         this.render();
@@ -32,7 +32,11 @@ class UploadQueue {
     async process() {
         if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) return;
 
-        const item = this.queue.shift();
+        // Find first non-paused queued item
+        const nextIdx = this.queue.findIndex(i => i.status === 'queued');
+        if (nextIdx === -1) return;
+
+        const item = this.queue.splice(nextIdx, 1)[0];
         item.status = 'uploading';
         this.activeCount++;
         this.render();
@@ -42,24 +46,94 @@ class UploadQueue {
             item.status = 'completed';
             item.progress = 100;
         } catch (err) {
-            item.status = 'failed';
-            showToast(`Upload failed for ${item.file.name}: ${err.message}`, 'error');
+            if (item.status === 'cancelled') {
+                // Do nothing, already handled
+            } else if (item.status === 'paused') {
+                this.queue.unshift(item); // Put back in queue
+            } else {
+                item.status = 'failed';
+                showToast(`Upload failed for ${item.file.name}: ${err.message}`, 'error');
+            }
         } finally {
             this.activeCount--;
             this.render();
-            // Automatically remove completed/failed after 5s
-            setTimeout(() => {
-                this.transfers.delete(item.id);
-                this.render();
-            }, 5000);
+            
+            if (item.status === 'completed' || item.status === 'failed' || item.status === 'cancelled') {
+                setTimeout(() => {
+                    this.transfers.delete(item.id);
+                    this.render();
+                }, 5000);
+            }
             this.process();
         }
     }
 
-    uploadFile(item) {
+    pause(id) {
+        const item = this.transfers.get(id);
+        if (!item) return;
+        if (item.status === 'uploading' && item.xhr) {
+            item.status = 'paused';
+            item.xhr.abort();
+        } else if (item.status === 'queued') {
+            item.status = 'paused';
+        }
+        this.render();
+    }
+
+    resume(id) {
+        const item = this.transfers.get(id);
+        if (!item || item.status !== 'paused') return;
+        item.status = 'queued';
+        this.queue.push(item);
+        this.render();
+        this.process();
+    }
+
+    cancel(id) {
+        const item = this.transfers.get(id);
+        if (!item) return;
+        
+        const oldStatus = item.status;
+        item.status = 'cancelled';
+        
+        if (oldStatus === 'uploading' && item.xhr) {
+            item.xhr.abort();
+        } else {
+            // Remove from queue if it was there
+            this.queue = this.queue.filter(i => i.id !== id);
+        }
+        
+        this.render();
+        setTimeout(() => {
+            this.transfers.delete(id);
+            this.render();
+        }, 2000);
+    }
+
+    async uploadFile(item) {
+        // --- TRUE RESUME LOGIC (Phase 8) ---
+        // 1. If we have a transfer_id (we were paused), ask server for progress
+        let startChunk = 0;
+        if (item.transfer_id) {
+            try {
+                const res = await apiCall(`/rooms/files/resume?transfer_id=${item.transfer_id}&direction=upload`);
+                startChunk = res.start_chunk || 0;
+                console.log(`Resuming ${item.file.name} from chunk ${startChunk}`);
+            } catch (e) {
+                console.warn("Resume failed, starting from scratch", e);
+                item.transfer_id = null; // Reset to start fresh
+            }
+        }
+
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            const url = `/api/rooms/files/upload?room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}`;
+            item.xhr = xhr;
+            
+            // Build URL - if resuming, server needs the transfer_id
+            let url = `/api/rooms/files/upload?room_name=${encodeURIComponent(item.roomName)}&filename=${encodeURIComponent(item.file.name)}`;
+            if (item.transfer_id) {
+                url += `&transfer_id=${item.transfer_id}&start_chunk=${startChunk}`;
+            }
             
             xhr.open('POST', url, true);
             xhr.setRequestHeader('Session-Id', sessionId);
@@ -67,21 +141,40 @@ class UploadQueue {
 
             xhr.upload.onprogress = (e) => {
                 if (e.lengthComputable) {
-                    item.progress = Math.round((e.loaded / e.total) * 100);
+                    // For UI, we calculate based on the whole file
+                    // But if we start from chunk 10 (10MB), e.loaded starts from 0 for the remaining data
+                    const bytesAlreadyUploaded = startChunk * (1024 * 1024);
+                    const totalBytes = item.file.size;
+                    const currentTotalUploaded = bytesAlreadyUploaded + e.loaded;
+                    item.progress = Math.round((currentTotalUploaded / totalBytes) * 100);
                     this.render();
                 }
             };
 
             xhr.onload = () => {
+                item.xhr = null;
                 if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve(JSON.parse(xhr.responseText));
+                    const data = JSON.parse(xhr.responseText);
+                    item.transfer_id = data.transfer_id; // Store for future pause/resume
+                    resolve(data);
                 } else {
                     reject(new Error(xhr.statusText));
                 }
             };
 
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send(item.file);
+            xhr.onerror = () => {
+                item.xhr = null;
+                reject(new Error('Network error'));
+            };
+            
+            xhr.onabort = () => {
+                item.xhr = null;
+                reject(new Error('Aborted'));
+            };
+
+            // If resuming, we slice the file
+            const blobToSend = startChunk > 0 ? item.file.slice(startChunk * 1024 * 1024) : item.file;
+            xhr.send(blobToSend);
         });
     }
 
@@ -93,25 +186,43 @@ class UploadQueue {
         }
         this.container.classList.remove('hidden');
 
-        this.container.innerHTML = '<h5 class="text-[10px] uppercase font-bold text-gray-500 mb-2 px-1">File Transfers</h5>';
+        this.container.innerHTML = '<h5 class="text-[10px] uppercase font-bold text-gray-500 mb-2 px-1 flex justify-between">File Transfers <span class="text-primary cursor-pointer hover:underline" onclick="uploadQueue.clearFinished()">Clear</span></h5>';
         this.transfers.forEach(item => {
             const div = document.createElement('div');
-            div.className = 'bg-black/40 p-2 rounded mb-1 text-xs border border-gray-800/50';
+            div.className = 'bg-black/40 p-2 rounded mb-1 text-xs border border-gray-800/50 group relative';
             
             const statusColors = {
                 queued: 'text-gray-500',
+                paused: 'text-yellow-500',
                 uploading: 'text-primary',
                 completed: 'text-green-500',
-                failed: 'text-red-500'
+                failed: 'text-red-500',
+                cancelled: 'text-gray-600'
             };
+
+            let controls = '';
+            if (item.status === 'uploading' || item.status === 'queued') {
+                controls = `<button onclick="uploadQueue.pause('${item.id}')" class="hover:text-yellow-500"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8v4a1 1 0 002 0V8a1 1 0 00-2 0zm4 0v4a1 1 0 002 0V8a1 1 0 00-2 0z"/></svg></button>`;
+            } else if (item.status === 'paused') {
+                controls = `<button onclick="uploadQueue.resume('${item.id}')" class="hover:text-green-500"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"/></svg></button>`;
+            }
+
+            if (['uploading', 'queued', 'paused'].includes(item.status)) {
+                controls += `<button onclick="uploadQueue.cancel('${item.id}')" class="ml-1 hover:text-red-500"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"/></svg></button>`;
+            }
 
             div.innerHTML = `
                 <div class="flex justify-between mb-1 truncate">
-                    <span class="truncate pr-2 font-medium">${item.file.name}</span>
-                    <span class="${statusColors[item.status]} uppercase font-bold text-[9px]">${item.status}</span>
+                    <span class="truncate pr-8 font-medium">${item.file.name}</span>
+                    <div class="flex items-center gap-1">
+                        <span class="${statusColors[item.status]} uppercase font-bold text-[9px]">${item.status}</span>
+                        <div class="flex items-center ml-1 text-gray-400">
+                            ${controls}
+                        </div>
+                    </div>
                 </div>
                 <div class="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
-                    <div class="h-full bg-primary transition-all duration-300" style="width: ${item.progress}%"></div>
+                    <div class="h-full bg-primary transition-all duration-300 ${item.status === 'paused' ? 'opacity-50' : ''}" style="width: ${item.progress}%"></div>
                 </div>
                 <div class="flex justify-between mt-1 text-[10px] text-gray-500">
                     <span>${formatBytes(item.file.size)}</span>
@@ -120,6 +231,15 @@ class UploadQueue {
             `;
             this.container.appendChild(div);
         });
+    }
+
+    clearFinished() {
+        this.transfers.forEach((item, id) => {
+            if (['completed', 'failed', 'cancelled'].includes(item.status)) {
+                this.transfers.delete(id);
+            }
+        });
+        this.render();
     }
 }
 

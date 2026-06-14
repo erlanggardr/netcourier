@@ -762,9 +762,9 @@ class ProcessServer:
             send_packet(conn, build_error_packet("MISSING_FIELD", request_id=req_id))
             return
 
-        # Phase 9: File size limit (e.g., 100MB)
-        if filesize > 100 * 1024 * 1024:
-            send_packet(conn, build_error_packet("FILE_TOO_LARGE", message="Max file size is 100MB", request_id=req_id))
+        # Phase 9: File size limit (e.g., 1024MB)
+        if filesize > 1024 * 1024 * 1024:
+            send_packet(conn, build_error_packet("FILE_TOO_LARGE", message="Max file size is 1024MB", request_id=req_id))
             return
 
         # Phase 9: Filename sanitization

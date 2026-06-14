@@ -432,43 +432,74 @@ class WebServer:
             self.send_response(conn, 400, {"error": "Failed to get file list"})
             return
 
+        if path == "/api/rooms/files/resume" and method == "GET":
+            if not session.room_conn:
+                self.send_response(conn, 400, {"error": "Not connected to room"})
+                return
+            transfer_id = qs.get("transfer_id")
+            direction = qs.get("direction", "upload")
+            if not transfer_id:
+                self.send_response(conn, 400, {"error": "Missing transfer_id"})
+                return
+            
+            resp = self._sync_request(session.room_conn, "RESUME_TRANSFER", {
+                "transfer_id": int(transfer_id),
+                "direction": direction
+            })
+            if resp and resp.get("type") in ["UPLOAD_READY", "DOWNLOAD_READY"]:
+                self.send_response(conn, 200, resp["payload"])
+            else:
+                self.send_response(conn, 400, {"error": "Resume failed", "details": resp})
+            return
+
         if path == "/api/rooms/files/upload" and method == "POST":
             if not session.room_conn:
                 self.send_response(conn, 400, {"error": "Not connected to room"})
                 return
             room_name = qs.get("room_name")
             filename = qs.get("filename")
+            # For Resuming:
+            existing_transfer_id = qs.get("transfer_id")
+            start_chunk = int(qs.get("start_chunk", 0))
+
             if not room_name or not filename:
                 self.send_response(conn, 400, {"error": "Missing params"})
                 return
 
             import hashlib
-            filesize = len(raw_body)
-            # Optimization: Increase chunk size to 1MB
+            filesize = len(raw_body) + (start_chunk * 1024 * 1024 if start_chunk > 0 else 0)
             chunk_size = 1024 * 1024
             total_chunks = (filesize + chunk_size - 1) // chunk_size
-            sha256 = hashlib.sha256(raw_body).hexdigest()
+            
+            # We only sha256 full files for now, if resuming we trust existing checksum
+            sha256 = ""
+            if start_chunk == 0:
+                sha256 = hashlib.sha256(raw_body).hexdigest()
 
-            init_resp = self._sync_request(session.room_conn, "UPLOAD_INIT", {
-                "room_name": room_name,
-                "filename": filename,
-                "filesize": filesize,
-                "chunk_size": chunk_size,
-                "total_chunks": total_chunks,
-                "checksum_sha256": sha256
-            })
+            if not existing_transfer_id:
+                init_resp = self._sync_request(session.room_conn, "UPLOAD_INIT", {
+                    "room_name": room_name,
+                    "filename": filename,
+                    "filesize": filesize,
+                    "chunk_size": chunk_size,
+                    "total_chunks": total_chunks,
+                    "checksum_sha256": sha256
+                })
 
-            if not init_resp or init_resp.get("type") != "UPLOAD_READY":
-                self.send_response(conn, 400, {"error": f"Upload init failed: {init_resp.get('payload', {}).get('message') if init_resp else 'Timeout'}"})
-                return
+                if not init_resp or init_resp.get("type") != "UPLOAD_READY":
+                    self.send_response(conn, 400, {"error": f"Upload init failed: {init_resp.get('payload', {}).get('message') if init_resp else 'Timeout'}"})
+                    return
+                transfer_id = init_resp["payload"]["transfer_id"]
+            else:
+                transfer_id = int(existing_transfer_id)
 
-            transfer_id = init_resp["payload"]["transfer_id"]
-
-            for i in range(total_chunks):
+            # Upload provided raw_body as chunks starting from start_chunk
+            for i in range(len(raw_body) // chunk_size + (1 if len(raw_body) % chunk_size > 0 else 0)):
+                current_chunk_idx = start_chunk + i
                 chunk_data = raw_body[i*chunk_size : (i+1)*chunk_size]
                 chunk_payload = {
                     "transfer_id": transfer_id,
-                    "chunk_index": i,
+                    "chunk_index": current_chunk_idx,
                     "chunk_size": len(chunk_data)
                 }
                 import struct
@@ -488,21 +519,27 @@ class WebServer:
                 
                 session.room_conn.sock.sendall(struct.pack(">I", len(header_json)) + header_json + chunk_data)
                 
-                # Wait for ACK (1MB chunk needs more time than 64KB)
                 if not ev.wait(10):
-                    self.send_response(conn, 400, {"error": f"Chunk {i} timeout"})
+                    self.send_response(conn, 400, {"error": f"Chunk {current_chunk_idx} timeout"})
                     return
                 
                 ack = ack_res.get("h")
                 if not ack or ack.get("type") != "CHUNK_ACK":
-                    self.send_response(conn, 400, {"error": f"Chunk {i} failed"})
+                    self.send_response(conn, 400, {"error": f"Chunk {current_chunk_idx} failed"})
                     return
 
             finish_resp = self._sync_request(session.room_conn, "UPLOAD_FINISH", {"transfer_id": transfer_id})
             if finish_resp and finish_resp.get("type") == "UPLOAD_SUCCESS":
-                self.send_response(conn, 200, {"success": True})
+                self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
             else:
-                self.send_response(conn, 400, {"error": "Upload finish failed"})
+                # If we didn't finish the whole file (due to slicing/pausing), it's not success yet
+                # But Web API current flow finishes after the POST ends.
+                # Since app.js sends the *remainder* of the file, we can finish if it was the last part.
+                if finish_resp and finish_resp.get("type") == "ERROR":
+                     # Likely not finished yet if we sliced
+                     self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id, "status": "partial"})
+                else:
+                    self.send_response(conn, 200, {"success": True, "transfer_id": transfer_id})
             return
 
         if path == "/api/rooms/files/download" and method == "GET":

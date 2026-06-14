@@ -137,6 +137,7 @@ Gunakan checklist ini sebagai roadmap implementasi.
 - [x] Test disconnect saat download.
 - [x] Test disconnect saat upload.
 - [x] Validasi checksum setelah resume.
+- [x] Optimasi kecepatan transfer (1MB chunk + DB Batching).
 
 ---
 
@@ -145,8 +146,9 @@ Gunakan checklist ini sebagai roadmap implementasi.
 - [x] Implement malformed packet handling.
 - [x] Implement rate limiting chat.
 - [x] Implement rate limiting PM.
-- [x] Implement file size limit.
+- [x] Implement file size limit (1GB).
 - [x] Implement filename sanitizer.
+- [x] Pause/Cancel transfer di Web UI.
 - [x] Implement timeout client.
 - [x] Implement timeout transfer.
 - [x] Implement token expiry optional.
