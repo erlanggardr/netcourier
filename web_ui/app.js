@@ -5,6 +5,8 @@ let currentRoom = localStorage.getItem('currentRoom') || null;
 let currentRoomData = null;
 let currentPmUser = null;
 let isRegistering = false;
+let typingTimeout = null;
+let roomMembersInterval = null;
 
 // --- Utilities ---
 function escapeHTML(str) {

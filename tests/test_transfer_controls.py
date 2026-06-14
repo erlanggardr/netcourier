@@ -26,9 +26,17 @@ def test_pause_resume():
     # 1. Login & Join Room
     gw_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     gw_client.connect((GATEWAY_HOST, GATEWAY_PORT))
+    # Register "tester" (ignore error if username taken)
+    send_packet(gw_client, {"type": MESSAGE_TYPES["REGISTER"], "payload": {"username": "tester", "password": "password", "display_name": "Tester"}})
+    receive_packet(gw_client)
+    
     send_packet(gw_client, {"type": MESSAGE_TYPES["LOGIN"], "payload": {"username": "tester", "password": "password"}})
     h, _ = receive_packet(gw_client)
     token = h.get("token") or h.get("payload", {}).get("token")
+    
+    # Create Lobby room
+    send_packet(gw_client, {"type": MESSAGE_TYPES["CREATE_ROOM"], "token": token, "payload": {"room_name": "Lobby", "description": "Lobby room"}})
+    receive_packet(gw_client)
     
     # Try join Lobby
     send_packet(gw_client, {"type": MESSAGE_TYPES["JOIN_ROOM"], "token": token, "payload": {"room_name": "Lobby"}})

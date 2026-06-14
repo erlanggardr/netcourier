@@ -1,8 +1,11 @@
-
 import socket
 import json
 import struct
 import time
+import sys
+import io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def send_packet(sock, packet):
     header_json = json.dumps(packet).encode('utf-8')
@@ -22,6 +25,10 @@ def run_full_test():
     print("--- 1. Testing Core Auth & Connection ---")
     try:
         gw = socket.create_connection((host, gw_port), timeout=2)
+        # Register debuguser (ignore error if already exists)
+        send_packet(gw, {"type": "REGISTER", "payload": {"username": "debuguser", "password": "password123", "display_name": "Debug User"}})
+        receive_packet(gw)
+        
         send_packet(gw, {"type": "LOGIN", "payload": {"username": "debuguser", "password": "password123"}})
         resp = receive_packet(gw)
         if resp.get("type") == "LOGIN_OK":

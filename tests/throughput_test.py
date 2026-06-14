@@ -34,9 +34,17 @@ def run_throughput_benchmark():
         client.connect((GATEWAY_HOST, GATEWAY_PORT))
         
         # 1. Auth
+        # Register "tester" (ignore error if username taken)
+        send_packet(client, {"type": MESSAGE_TYPES["REGISTER"], "payload": {"username": "tester", "password": "password", "display_name": "Tester"}})
+        receive_packet(client)
+        
         send_packet(client, {"type": MESSAGE_TYPES["LOGIN"], "payload": {"username": "tester", "password": "password"}})
         h, _ = receive_packet(client)
         token = h.get("token") or h.get("payload", {}).get("token")
+        
+        # Create General room
+        send_packet(client, {"type": MESSAGE_TYPES["CREATE_ROOM"], "token": token, "payload": {"room_name": "General", "description": "General room"}})
+        receive_packet(client)
         
         # 2. Join Room
         send_packet(client, {"type": MESSAGE_TYPES["JOIN_ROOM"], "token": token, "payload": {"room_name": "General"}})
