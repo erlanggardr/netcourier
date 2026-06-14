@@ -14,7 +14,7 @@ from common.constants import (
 )
 from common.protocol import receive_packet, send_packet, build_packet, build_error_packet
 from common.logging_config import setup_logging
-from common.db import get_db_connection
+from common.db import get_db_connection, initialize_db
 
 import os
 import re
@@ -44,10 +44,11 @@ class RateLimiter:
             return True
 
 class ProcessServer:
-    def __init__(self, server_id, host, port, gateway_host, gateway_port):
+    def __init__(self, server_id, host, port, gateway_host, gateway_port, advertise_host=None):
         self.server_id = server_id
         self.host = host
         self.port = port
+        self.advertise_host = advertise_host or host
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         
@@ -67,6 +68,8 @@ class ProcessServer:
         self.transfer_progress = {}
 
     def start(self):
+        self.logger.info("Initializing database...")
+        initialize_db()
         self.running = True
         
         # 1. Connect to Gateway
@@ -186,7 +189,7 @@ class ProcessServer:
             # Register backend
             reg_packet = build_packet("REGISTER_BACKEND", {
                 "server_id": self.server_id,
-                "host": self.host,
+                "host": self.advertise_host,
                 "port": self.port
             })
             send_packet(self.gateway_sock, reg_packet)
@@ -1191,6 +1194,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--gateway-host", default=DEFAULT_GATEWAY_HOST)
     parser.add_argument("--gateway-port", type=int, default=DEFAULT_GATEWAY_BACKEND_PORT)
+    parser.add_argument("--advertise-host", help="Host address to advertise to Gateway (useful for Docker)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     args = parser.parse_args()
@@ -1201,5 +1205,5 @@ if __name__ == "__main__":
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    server = ProcessServer(args.server_id, args.host, args.port, args.gateway_host, args.gateway_port)
+    server = ProcessServer(args.server_id, args.host, args.port, args.gateway_host, args.gateway_port, advertise_host=args.advertise_host)
     server.start()

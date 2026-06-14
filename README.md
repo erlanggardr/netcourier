@@ -238,6 +238,7 @@ python -m gateway.main
 ```
 
 ### Terminal 2: Process Server S1
+
 ```bash
 python -m server.main --server-id S1 --port 9101
 ```
