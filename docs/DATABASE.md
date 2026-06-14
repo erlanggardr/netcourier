@@ -1,12 +1,12 @@
 # Database Design - NetCourier
 
-Dokumen ini mendesain database NetCourier untuk arsitektur:
+This document designs the NetCourier database for the following architecture:
 
 ```txt
 Gateway/Auth/Load Balancer + Process Server S1/S2 + Central Database
 ```
 
-Database pusat menyimpan data auth, room, chat history, PM history, file metadata, transfer state, log, dan metrics. File fisik tetap disimpan di file storage Process Server.
+The central database stores authentication data, rooms, chat histories, PM histories, file metadata, transfer states, logs, and metrics. Physical files are stored in the local file storage of the respective Process Server.
 
 ---
 
@@ -208,272 +208,272 @@ erDiagram
 
 ## 2. Table Definitions
 
-## 2.1 users
+### 2.1 users
 
-Menyimpan akun user.
+Stores user account information.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| user_id | INTEGER | PK, auto increment | ID user |
-| username | VARCHAR(50) | UNIQUE, NOT NULL | Username login |
-| password_hash | TEXT | NOT NULL | Hash password |
-| display_name | VARCHAR(100) | NOT NULL | Nama tampilan |
-| status | VARCHAR(20) | NOT NULL | active/banned |
-| created_at | DATETIME | NOT NULL | Waktu register |
-| last_login_at | DATETIME | NULL | Login terakhir |
+| user_id | INTEGER | PK, Auto-increment | Unique identifier for the user |
+| username | VARCHAR(50) | UNIQUE, NOT NULL | Username used for logging in |
+| password_hash | TEXT | NOT NULL | Hashed password |
+| display_name | VARCHAR(100) | NOT NULL | User's display profile name |
+| status | VARCHAR(20) | NOT NULL | Status of the user account (active/banned) |
+| created_at | DATETIME | NOT NULL | Date and time of registration |
+| last_login_at | DATETIME | NULL | Timestamp of the last successful login |
 
 Rules:
-- Username unik.
-- Password tidak boleh plain text.
+- Username must be unique.
+- Passwords must not be stored in plain text.
 
 ---
 
-## 2.2 sessions
+### 2.2 sessions
 
-Menyimpan session login Gateway.
+Stores login sessions on the Gateway.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| session_id | INTEGER | PK | ID session |
-| user_id | INTEGER | FK users.user_id | Pemilik session |
-| token_hash | TEXT | UNIQUE, NOT NULL | Hash session token |
-| is_active | BOOLEAN | NOT NULL | Status session |
-| client_ip | VARCHAR(50) | NULL | IP client |
-| connected_at | DATETIME | NOT NULL | Waktu login/connect |
-| last_seen_at | DATETIME | NOT NULL | Aktivitas terakhir |
-| disconnected_at | DATETIME | NULL | Waktu disconnect/logout |
+| session_id | INTEGER | PK, Auto-increment | Unique session ID |
+| user_id | INTEGER | FK users.user_id | Associated user ID |
+| token_hash | TEXT | UNIQUE, NOT NULL | SHA-256 hash of the session token |
+| is_active | BOOLEAN | NOT NULL | Session status flag (active/inactive) |
+| client_ip | VARCHAR(50) | NULL | Client IP address |
+| connected_at | DATETIME | NOT NULL | Session connection / login timestamp |
+| last_seen_at | DATETIME | NOT NULL | Last activity timestamp |
+| disconnected_at | DATETIME | NULL | Session disconnection / logout timestamp |
 
 Rules:
-- Token asli tidak perlu disimpan, cukup hash token.
-- Session nonaktif tidak boleh dipakai.
+- The actual plain token must not be stored in the database; save only its hash.
+- Inactive sessions must not be accepted for authentication.
 
 ---
 
-## 2.3 backend_servers
+### 2.3 backend_servers
 
-Menyimpan daftar Process Server.
+Stores the list of active/inactive Process Servers.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| server_id | VARCHAR(20) | PK | S1/S2 |
-| host | VARCHAR(100) | NOT NULL | Host/IP |
-| port | INTEGER | NOT NULL | Port client-facing |
-| status | VARCHAR(20) | NOT NULL | alive/down |
-| active_rooms | INTEGER | NOT NULL | Jumlah room aktif |
-| active_clients | INTEGER | NOT NULL | Jumlah client aktif |
-| active_transfers | INTEGER | NOT NULL | Transfer aktif |
-| last_heartbeat_at | DATETIME | NULL | Heartbeat terakhir |
+| server_id | VARCHAR(20) | PK | Server ID (e.g., S1/S2) |
+| host | VARCHAR(100) | NOT NULL | Host name or IP address |
+| port | INTEGER | NOT NULL | Client-facing TCP port |
+| status | VARCHAR(20) | NOT NULL | Server status (alive/down) |
+| active_rooms | INTEGER | NOT NULL | Number of active chat rooms assigned |
+| active_clients | INTEGER | NOT NULL | Number of active connected clients |
+| active_transfers | INTEGER | NOT NULL | Number of active concurrent transfers |
+| last_heartbeat_at | DATETIME | NULL | Timestamp of the last received heartbeat |
 
 ---
 
-## 2.4 user_presence
+### 2.4 user_presence
 
-Menyimpan presence global user.
+Stores global user presence status.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| presence_id | INTEGER | PK | ID presence |
-| user_id | INTEGER | FK users.user_id, UNIQUE | User |
-| username | VARCHAR(50) | NOT NULL | Username copy |
-| status | VARCHAR(20) | NOT NULL | waiting/in_room/offline |
-| server_id | VARCHAR(20) | FK backend_servers.server_id, NULL | Server aktif jika in_room |
-| active_room | VARCHAR(100) | NULL | Nama room aktif |
-| last_seen_at | DATETIME | NOT NULL | Aktivitas terakhir |
+| presence_id | INTEGER | PK, Auto-increment | Unique presence ID |
+| user_id | INTEGER | FK users.user_id, UNIQUE | Associated user ID |
+| username | VARCHAR(50) | NOT NULL | Denormalized username copy |
+| status | VARCHAR(20) | NOT NULL | Presence status (waiting/in_room/offline) |
+| server_id | VARCHAR(20) | FK backend_servers.server_id, NULL | Active Server ID (if user is in a room) |
+| active_room | VARCHAR(100) | NULL | Name of the active room the user is in |
+| last_seen_at | DATETIME | NOT NULL | Last seen timestamp |
 
 ---
 
-## 2.5 rooms
+### 2.5 rooms
 
-Menyimpan room.
+Stores chat room details.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| room_id | INTEGER | PK | ID room |
-| room_name | VARCHAR(100) | UNIQUE, NOT NULL | Nama room |
-| created_by | INTEGER | FK users.user_id | Creator |
-| server_id | VARCHAR(20) | FK backend_servers.server_id | Server pemilik room |
-| description | TEXT | NULL | Deskripsi |
-| visibility | VARCHAR(20) | NOT NULL | public/private |
-| created_at | DATETIME | NOT NULL | Waktu dibuat |
-| is_active | BOOLEAN | NOT NULL | Status aktif |
+| room_id | INTEGER | PK, Auto-increment | Unique room ID |
+| room_name | VARCHAR(100) | UNIQUE, NOT NULL | Chat room name |
+| created_by | INTEGER | FK users.user_id | Room creator ID |
+| server_id | VARCHAR(20) | FK backend_servers.server_id | Process Server hosting the room |
+| description | TEXT | NULL | Description of the room |
+| visibility | VARCHAR(20) | NOT NULL | Room visibility (public/private) |
+| created_at | DATETIME | NOT NULL | Room creation timestamp |
+| is_active | BOOLEAN | NOT NULL | Room active status flag |
 
 ---
 
-## 2.6 room_mapping
+### 2.6 room_mapping
 
-Mapping room ke server.
+Maps rooms to their designated Process Servers for room affinity.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| mapping_id | INTEGER | PK | ID mapping |
-| room_id | INTEGER | FK rooms.room_id, UNIQUE | Room |
-| room_name | VARCHAR(100) | UNIQUE, NOT NULL | Nama room |
-| server_id | VARCHAR(20) | FK backend_servers.server_id | Server pemilik |
-| assigned_at | DATETIME | NOT NULL | Waktu assign |
-| is_active | BOOLEAN | NOT NULL | Mapping aktif |
+| mapping_id | INTEGER | PK, Auto-increment | Unique mapping ID |
+| room_id | INTEGER | FK rooms.room_id, UNIQUE | Room ID |
+| room_name | VARCHAR(100) | UNIQUE, NOT NULL | Chat room name |
+| server_id | VARCHAR(20) | FK backend_servers.server_id | Process Server assigned |
+| assigned_at | DATETIME | NOT NULL | Assignment timestamp |
+| is_active | BOOLEAN | NOT NULL | Mapping active status flag |
 
 Rules:
-- Satu room hanya boleh punya satu mapping aktif.
+- A room must have exactly one active server mapping.
 
 ---
 
-## 2.7 room_members
+### 2.7 room_members
 
-Menyimpan membership room.
+Stores room membership details.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| member_id | INTEGER | PK | ID member |
-| room_id | INTEGER | FK rooms.room_id | Room |
-| user_id | INTEGER | FK users.user_id | User |
-| username | VARCHAR(50) | NOT NULL | Username copy |
-| role | VARCHAR(20) | NOT NULL | admin/member |
-| joined_at | DATETIME | NOT NULL | Waktu join |
-| left_at | DATETIME | NULL | Waktu leave |
-| is_active | BOOLEAN | NOT NULL | Sedang aktif di room |
+| member_id | INTEGER | PK, Auto-increment | Unique member ID |
+| room_id | INTEGER | FK rooms.room_id | Room ID |
+| user_id | INTEGER | FK users.user_id | User ID |
+| username | VARCHAR(50) | NOT NULL | Denormalized username copy |
+| role | VARCHAR(20) | NOT NULL | Room role (admin/member) |
+| joined_at | DATETIME | NOT NULL | Join timestamp |
+| left_at | DATETIME | NULL | Leave timestamp |
+| is_active | BOOLEAN | NOT NULL | Active membership status flag |
 
 ---
 
-## 2.8 room_messages
+### 2.8 room_messages
 
-Menyimpan room chat history.
+Stores room chat message history.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| message_id | INTEGER | PK | ID pesan |
-| room_id | INTEGER | FK rooms.room_id | Room |
-| server_id | VARCHAR(20) | FK backend_servers.server_id | Server pemroses |
-| sender_id | INTEGER | FK users.user_id, NULL | Sender |
-| sender_username | VARCHAR(50) | NULL | Username sender |
-| message_type | VARCHAR(20) | NOT NULL | text/system/file_event |
-| content | TEXT | NOT NULL | Isi pesan |
-| created_at | DATETIME | NOT NULL | Timestamp |
-| is_deleted | BOOLEAN | NOT NULL | Soft delete |
+| message_id | INTEGER | PK, Auto-increment | Unique message ID |
+| room_id | INTEGER | FK rooms.room_id | Room ID |
+| server_id | VARCHAR(20) | FK backend_servers.server_id | Process Server that routed the message |
+| sender_id | INTEGER | FK users.user_id, NULL | Sender User ID |
+| sender_username | VARCHAR(50) | NULL | Sender username copy |
+| message_type | VARCHAR(20) | NOT NULL | Message type (text/system/file_event) |
+| content | TEXT | NOT NULL | Message text or event payload |
+| created_at | DATETIME | NOT NULL | Message timestamp |
+| is_deleted | BOOLEAN | NOT NULL | Soft delete status flag |
 
 Rules:
-- `sender_id` boleh NULL untuk system message.
-- Pesan tidak dihapus permanen, gunakan soft delete.
+- `sender_id` can be NULL for system generated messages.
+- Messages must not be permanently deleted; use soft delete instead.
 
 ---
 
-## 2.9 private_messages
+### 2.9 private_messages
 
-Menyimpan PM global.
+Stores global private messages (PM).
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| private_message_id | INTEGER | PK | ID PM |
-| sender_id | INTEGER | FK users.user_id | Sender |
-| sender_username | VARCHAR(50) | NOT NULL | Username sender |
-| recipient_id | INTEGER | FK users.user_id | Recipient |
-| recipient_username | VARCHAR(50) | NOT NULL | Username recipient |
-| content | TEXT | NOT NULL | Isi pesan |
-| status | VARCHAR(20) | NOT NULL | sent/delivered/stored_offline/read/failed |
-| created_at | DATETIME | NOT NULL | Waktu kirim |
-| delivered_at | DATETIME | NULL | Waktu delivered |
-| read_at | DATETIME | NULL | Waktu dibaca |
+| private_message_id | INTEGER | PK, Auto-increment | Unique private message ID |
+| sender_id | INTEGER | FK users.user_id | Sender User ID |
+| sender_username | VARCHAR(50) | NOT NULL | Sender username |
+| recipient_id | INTEGER | FK users.user_id | Recipient User ID |
+| recipient_username | VARCHAR(50) | NOT NULL | Recipient username |
+| content | TEXT | NOT NULL | Private message text |
+| status | VARCHAR(20) | NOT NULL | Message status (sent/delivered/stored_offline/read/failed) |
+| created_at | DATETIME | NOT NULL | Time the private message was sent |
+| delivered_at | DATETIME | NULL | Time the private message was delivered |
+| read_at | DATETIME | NULL | Time the private message was read |
 
 Rules:
-- PM disimpan oleh Gateway.
-- PM dapat diterima user yang sedang waiting maupun in_room.
+- PMs are coordinated and stored by the Gateway.
+- PMs can be received by users whether they are in the lobby (waiting) or active inside a room.
 
 ---
 
-## 2.10 files
+### 2.10 files
 
-Menyimpan metadata file.
+Stores metadata of uploaded files.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| file_id | INTEGER | PK | ID file |
-| room_id | INTEGER | FK rooms.room_id | Room |
-| server_id | VARCHAR(20) | FK backend_servers.server_id | Server storage |
-| uploader_id | INTEGER | FK users.user_id | Uploader |
-| original_filename | VARCHAR(255) | NOT NULL | Nama asli |
-| stored_filename | VARCHAR(255) | NOT NULL | Nama di server |
-| stored_path | TEXT | NOT NULL | Path file |
-| size_bytes | INTEGER | NOT NULL | Ukuran |
-| checksum_sha256 | TEXT | NOT NULL | SHA-256 |
-| chunk_size | INTEGER | NOT NULL | Chunk size |
-| total_chunks | INTEGER | NOT NULL | Total chunk |
-| status | VARCHAR(20) | NOT NULL | uploading/available/corrupted/deleted |
-| uploaded_at | DATETIME | NOT NULL | Waktu upload |
+| file_id | INTEGER | PK, Auto-increment | Unique file ID |
+| room_id | INTEGER | FK rooms.room_id | Room ID |
+| server_id | VARCHAR(20) | FK backend_servers.server_id | Server storing the physical file |
+| uploader_id | INTEGER | FK users.user_id | Uploader user ID |
+| original_filename | VARCHAR(255) | NOT NULL | Original filename |
+| stored_filename | VARCHAR(255) | NOT NULL | Sanitized filename stored on disk |
+| stored_path | TEXT | NOT NULL | File path on disk |
+| size_bytes | INTEGER | NOT NULL | File size in bytes |
+| checksum_sha256 | TEXT | NOT NULL | SHA-256 checksum hash |
+| chunk_size | INTEGER | NOT NULL | Size of each file chunk |
+| total_chunks | INTEGER | NOT NULL | Total number of chunks |
+| status | VARCHAR(20) | NOT NULL | File status (uploading/available/corrupted/deleted) |
+| uploaded_at | DATETIME | NOT NULL | Upload timestamp |
 
 ---
 
-## 2.11 file_transfers
+### 2.11 file_transfers
 
-Menyimpan state upload/download.
+Stores state metrics for file uploads and downloads.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| transfer_id | INTEGER | PK | ID transfer |
-| file_id | INTEGER | FK files.file_id, NULL | File |
-| room_id | INTEGER | FK rooms.room_id | Room |
-| server_id | VARCHAR(20) | FK backend_servers.server_id | Server |
-| user_id | INTEGER | FK users.user_id | User |
-| direction | VARCHAR(20) | NOT NULL | upload/download |
-| status | VARCHAR(20) | NOT NULL | pending/in_progress/completed/interrupted/failed |
-| total_chunks | INTEGER | NOT NULL | Total chunk |
-| completed_chunks | INTEGER | NOT NULL | Chunk selesai |
-| bytes_transferred | INTEGER | NOT NULL | Bytes |
-| resume_token | TEXT | UNIQUE, NULL | Token resume |
-| started_at | DATETIME | NOT NULL | Start |
-| ended_at | DATETIME | NULL | End |
-| last_activity_at | DATETIME | NOT NULL | Last activity |
+| transfer_id | INTEGER | PK, Auto-increment | Unique transfer session ID |
+| file_id | INTEGER | FK files.file_id, NULL | Associated file ID |
+| room_id | INTEGER | FK rooms.room_id | Room ID |
+| server_id | VARCHAR(20) | FK backend_servers.server_id | Process Server handling the transfer |
+| user_id | INTEGER | FK users.user_id | User ID performing the transfer |
+| direction | VARCHAR(20) | NOT NULL | Transfer direction (upload/download) |
+| status | VARCHAR(20) | NOT NULL | Transfer status (pending/in_progress/completed/interrupted/failed) |
+| total_chunks | INTEGER | NOT NULL | Total number of chunks |
+| completed_chunks | INTEGER | NOT NULL | Completed chunks count |
+| bytes_transferred | INTEGER | NOT NULL | Bytes transferred |
+| resume_token | TEXT | UNIQUE, NULL | Resume token for verifying sessions |
+| started_at | DATETIME | NOT NULL | Started timestamp |
+| ended_at | DATETIME | NULL | Ended timestamp |
+| last_activity_at | DATETIME | NOT NULL | Last activity timestamp |
 
 ---
 
-## 2.12 transfer_chunks
+### 2.12 transfer_chunks
 
-Menyimpan status chunk.
+Stores the receipt/transmission status of individual file chunks.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| chunk_id | INTEGER | PK | ID chunk |
-| transfer_id | INTEGER | FK file_transfers.transfer_id | Transfer |
-| chunk_index | INTEGER | NOT NULL | Index chunk |
-| size_bytes | INTEGER | NOT NULL | Ukuran chunk |
-| status | VARCHAR(20) | NOT NULL | pending/received/sent/failed |
-| processed_at | DATETIME | NULL | Waktu diproses |
+| chunk_id | INTEGER | PK, Auto-increment | Unique chunk ID |
+| transfer_id | INTEGER | FK file_transfers.transfer_id | Transfer ID |
+| chunk_index | INTEGER | NOT NULL | Chunk index (0-based) |
+| size_bytes | INTEGER | NOT NULL | Chunk size in bytes |
+| status | VARCHAR(20) | NOT NULL | Chunk status (pending/received/sent/failed) |
+| processed_at | DATETIME | NULL | Processed timestamp |
 
-Constraint:
+Constraints:
 - UNIQUE(transfer_id, chunk_index)
 
 ---
 
-## 2.13 server_logs
+### 2.13 server_logs
 
-Menyimpan log.
+Stores audit logs.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| log_id | INTEGER | PK | ID log |
+| log_id | INTEGER | PK, Auto-increment | Unique log ID |
 | server_id | VARCHAR(20) | FK backend_servers.server_id, NULL | Server |
-| user_id | INTEGER | FK users.user_id, NULL | User terkait |
-| room_id | INTEGER | FK rooms.room_id, NULL | Room terkait |
-| event_type | VARCHAR(50) | NOT NULL | Jenis event |
-| message | TEXT | NOT NULL | Pesan log |
-| ip_address | VARCHAR(50) | NULL | IP client |
-| created_at | DATETIME | NOT NULL | Waktu log |
+| user_id | INTEGER | FK users.user_id, NULL | Associated user ID |
+| room_id | INTEGER | FK rooms.room_id, NULL | Associated room ID |
+| event_type | VARCHAR(50) | NOT NULL | Event type category |
+| message | TEXT | NOT NULL | Log message description |
+| ip_address | VARCHAR(50) | NULL | Client IP address |
+| created_at | DATETIME | NOT NULL | Log generation timestamp |
 
 ---
 
-## 2.14 performance_metrics
+### 2.14 performance_metrics
 
-Menyimpan hasil pengujian.
+Stores performance evaluation metrics.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
-| metric_id | INTEGER | PK | ID metric |
-| transfer_id | INTEGER | FK file_transfers.transfer_id, NULL | Transfer |
-| user_id | INTEGER | FK users.user_id, NULL | User |
-| room_id | INTEGER | FK rooms.room_id, NULL | Room |
-| server_id | VARCHAR(20) | FK backend_servers.server_id, NULL | Server |
-| metric_type | VARCHAR(50) | NOT NULL | latency/throughput/error_rate |
-| value | REAL | NOT NULL | Nilai |
-| unit | VARCHAR(20) | NOT NULL | ms/KBps/MBps/percent |
-| measured_at | DATETIME | NOT NULL | Waktu ukur |
+| metric_id | INTEGER | PK, Auto-increment | Unique metric ID |
+| transfer_id | INTEGER | FK file_transfers.transfer_id, NULL | Associated transfer ID |
+| user_id | INTEGER | FK users.user_id, NULL | Associated user ID |
+| room_id | INTEGER | FK rooms.room_id, NULL | Associated room ID |
+| server_id | VARCHAR(20) | FK backend_servers.server_id, NULL | Associated Process Server ID |
+| metric_type | VARCHAR(50) | NOT NULL | Metric category (latency/throughput/error_rate) |
+| value | REAL | NOT NULL | Measured metric value |
+| unit | VARCHAR(20) | NOT NULL | Measurement unit (ms/KBps/MBps/percent) |
+| measured_at | DATETIME | NOT NULL | Measurement timestamp |
 
 ---
 
@@ -676,7 +676,7 @@ CREATE TABLE performance_metrics (
 
 ---
 
-## 4. Index Recommendation
+## 4. Recommended Indexes
 
 ```sql
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
@@ -700,7 +700,7 @@ CREATE INDEX idx_metrics_type ON performance_metrics(metric_type);
 |---|---|---|
 | users | Gateway | Gateway |
 | sessions | Gateway | Gateway, Process Server via validation |
-| backend_servers | Gateway/Process Server heartbeat | Gateway |
+| backend_servers | Gateway / Process Server heartbeat | Gateway |
 | room_mapping | Gateway | Gateway |
 | user_presence | Gateway + Process Server status update | Gateway |
 | private_messages | Gateway | Gateway |
@@ -709,20 +709,20 @@ CREATE INDEX idx_metrics_type ON performance_metrics(metric_type);
 | room_messages | Process Server | Process Server |
 | files | Process Server | Process Server |
 | file_transfers | Process Server | Process Server |
-| server_logs | Gateway and Process Server | Operator/report |
-| performance_metrics | Gateway/Process Server/test script | Report |
+| server_logs | Gateway and Process Server | Operator / reports |
+| performance_metrics | Gateway / Process Server / test script | Reports |
 
 ---
 
 ## 6. Important Database Rules
 
-1. Password must be hashed.
-2. Token should be stored as hash.
-3. PM history is global and stored by Gateway.
-4. Room history is stored by Process Server.
-5. Room must have exactly one active server mapping.
-6. File physical content is not stored in database.
-7. File metadata must include checksum.
-8. Transfer state must support resume.
-9. Use soft delete for messages and files if possible.
-10. Log important events for demo and report.
+1. Passwords must be hashed.
+2. Session tokens should be stored as hashes.
+3. PM history is global and stored by the Gateway.
+4. Room history is stored by the Process Server.
+5. A room must have exactly one active server mapping.
+6. File physical content is not stored in the database.
+7. File metadata must include a checksum.
+8. Transfer states must support resume.
+9. Use soft deletes for messages and files if possible.
+10. Log important events for demo and report audits.

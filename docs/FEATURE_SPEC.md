@@ -1,156 +1,153 @@
 # Feature Specification - NetCourier
 
-Dokumen ini menjelaskan cara kerja setiap fitur NetCourier secara detail.
+This document describes the detailed behavior, specifications, and workflows of each NetCourier feature.
 
 ---
 
-## 1. Feature: Register
+## 1. Feature: User Registration
 
 ### Actor
-Guest.
+Guest user.
 
 ### Description
-Guest membuat akun baru melalui Gateway.
+A guest user creates a new account credentials through the Gateway Server.
 
 ### Normal Flow
-1. Guest membuka Web UI di browser.
-2. Guest mengisi form Register: username, password, dan display name.
-3. Guest menekan tombol **Register**.
-4. Client mengirim packet `REGISTER` ke Gateway.
-5. Gateway validasi input.
-6. Gateway hash password.
-7. Gateway simpan user ke database.
-8. Gateway membalas `REGISTER_OK`.
+1. The guest opens the NetCourier Web UI in a browser.
+2. The guest fills out the registration form: username, password, and display name.
+3. The guest clicks the **Register** button.
+4. The client sends a `REGISTER` packet to the Gateway.
+5. The Gateway validates the input format.
+6. The Gateway hashes the password using PBKDF2 with salt.
+7. The Gateway stores the new user record in the database.
+8. The Gateway returns a `REGISTER_OK` packet to the client.
 
 ### Error Flow
-- Username sudah digunakan -> `ERROR USERNAME_TAKEN`.
-- Password terlalu pendek -> `ERROR INVALID_PASSWORD`.
-- Username mengandung karakter berbahaya -> `ERROR INVALID_USERNAME`.
+- Username is already taken -> Returns `ERROR USERNAME_TAKEN`.
+- Password is too short -> Returns `ERROR INVALID_PASSWORD`.
+- Username contains forbidden/dangerous characters -> Returns `ERROR INVALID_USERNAME`.
 
 ### Acceptance Criteria
-- User baru tersimpan di database.
-- Password tidak tersimpan plain text.
-- Username duplikat ditolak.
+- A new user record is successfully inserted into the database.
+- Passwords must not be stored in plain text (must use PBKDF2).
+- Duplicate usernames must be rejected with appropriate error packets.
 
 ---
 
-## 2. Feature: Login
+## 2. Feature: User Login
 
 ### Actor
 Registered user.
 
 ### Description
-User login melalui Gateway untuk mendapatkan session token.
+A user logs in through the Gateway to obtain a session token.
 
 ### Normal Flow
-1. User mengisi form Login pada antarmuka Web UI di browser dan menekan tombol **Login**.
-2. Client mengirim `LOGIN`.
-3. Gateway cek username dan password hash.
-4. Gateway cek duplicate login.
-5. Gateway membuat session token.
-6. Gateway menyimpan session.
-7. Gateway mengubah presence menjadi online/waiting.
-8. Gateway membalas `LOGIN_OK`.
+1. The user fills out the login credentials in the Web UI and clicks the **Login** button.
+2. The client sends a `LOGIN` packet to the Gateway.
+3. The Gateway verifies the username and validates the password against the stored PBKDF2 hash.
+4. The Gateway checks for duplicate active login sessions.
+5. The Gateway generates a unique session token.
+6. The Gateway persists the session record in the database.
+7. The Gateway updates the user's presence state to online/waiting.
+8. The Gateway returns a `LOGIN_OK` packet with session details.
 
 ### Error Flow
-- Username/password salah -> `ERROR INVALID_CREDENTIALS`.
-- User sudah login -> `ERROR DUPLICATE_LOGIN`.
-- Database error -> `ERROR INTERNAL_ERROR`.
+- Incorrect username or password -> Returns `ERROR INVALID_CREDENTIALS`.
+- User is already logged in elsewhere -> Returns `ERROR DUPLICATE_LOGIN`.
+- Database transaction fails -> Returns `ERROR INTERNAL_ERROR`.
 
-### Output
-- token,
-- user_id,
-- username,
-- display_name.
+### Output Payload
+- `token`
+- `user_id`
+- `username`
+- `display_name`
 
 ---
 
-## 3. Feature: Waiting Room / Global Area
+## 3. Feature: Waiting Room / Global Lobby
 
 ### Actor
 Authenticated user.
 
 ### Description
-Setelah login, user berada di waiting room Gateway. Waiting room bukan room chat biasa, tetapi area global untuk PM, online user list, room list, create room, dan join room.
+Upon logging in, the user enters the global lobby/waiting room coordinated by the Gateway. The lobby is not a typical chat room but a global dashboard facilitating PM routing, global online user directory, room directories, room creation, and room joining.
 
 ### Available UI Actions
-- Melihat online user pada panel **Online Users**.
-- Mengirim PM melalui panel **Private Message**.
-- Membuka PM history melalui tombol **History**.
-- Melihat room list pada panel **Rooms**.
-- Membuat room melalui form **Create Room**.
-- Join room melalui tombol **Join** pada room yang dipilih.
-- Logout melalui tombol **Logout**.
-- Membuka help dialog melalui menu **Help**.
+- View online users in the **Online Users** panel.
+- Send Private Messages (PMs) through the **Private Message** panel.
+- Open private message history by clicking the **History** button.
+- View active rooms in the **Rooms** list panel.
+- Create new rooms using the **Create Room** form.
+- Join an existing room by clicking the **Join** button.
+- Log out using the **Logout** button.
+- Open help instructions from the **Help** menu.
 
 ### Acceptance Criteria
-- User bisa PM tanpa join room.
-- User bisa menerima PM saat belum join room.
-- User bisa melihat daftar room dari Gateway.
-
----
-
+- Users can send private messages without joining a chat room.
+- Users can receive private messages before they join any room.
+- Users can view a real-time list of active chat rooms from the Gateway.
 
 ---
 
 ## 3.1 Feature: Web UI & HTTP-to-TCP API Bridge
 
 ### Actor
-Authenticated user and guest.
+Authenticated user and Guest.
 
 ### Description
-NetCourier menggunakan aplikasi Single Page Web UI berbasis HTML/CSS/JS yang dihubungkan ke server melalui jembatan HTTP-to-TCP (`web_api/server.py`). Seluruh antarmuka dikendalikan melalui browser. Web UI menyediakan form login/register, waiting room, online user list, private message panel, room list, room chat panel, file list, upload/download controls, transfer progress, dan status bar.
+NetCourier utilizes a Single Page Application (SPA) Web UI built on vanilla HTML/CSS/JS connected to the backend via an HTTP-to-TCP API Bridge (`web_api/server.py`). The entire application interface is managed in the browser. The Web UI provides login/registration forms, a lobby/waiting room dashboard, online user listings, private messaging panels, room listings, room chat panels, file listings, upload/download controls, transfer progress indicators, and status bars.
 
 ### Normal Flow
-1. User menjalankan launcher client (`python client/main.py`) yang memulai HTTP Web Server.
-2. User membuka tautan `http://localhost:8080` di browser.
-3. User login/register melalui form Web UI.
-4. Setelah login, browser menerima session cookie/token dan mengarahkan pengguna ke Waiting Room view.
-5. User dapat mengirim PM, melihat user online, membuat/join room.
-6. Saat join room, Web UI menampilkan Room Chat panel, sedangkan API bridge tetap mempertahankan koneksi Gateway di latar belakang.
-7. Event yang masuk ke TCP socket akan dikumpulkan di memori server dan dikirim ke browser secara berkala menggunakan long-polling `/api/events`.
+1. The user runs the client launcher (`python client/main.py`) which starts the local HTTP Web Server.
+2. The user navigates to `http://localhost:8080` in their web browser.
+3. The user logs in or registers via the Web UI forms.
+4. Upon authentication, the browser stores the session token and redirects the user to the Lobby/Waiting Room view.
+5. The user can send private messages, view online users, and create or join rooms.
+6. Upon joining a room, the Web UI displays the Room Chat panel while the API bridge maintains the Gateway TCP socket connection in the background.
+7. Asynchronous events received by the background TCP sockets are queued in server memory and polled by the browser client via long-polling `/api/events` requests.
 
 ### Acceptance Criteria
-- Semua fitur user-facing tersedia melalui Web UI di browser.
-- Web UI responsif dan tidak membeku (*non-blocking*) saat menerima obrolan, PM, upload, atau download.
-- Komunikasi socket TCP dilindungi oleh kunci thread-safe (`threading.Lock`), dan pembaruan event dikirim menggunakan antrean sinkronisasi `WebSession.events`.
-- Pengunggahan dan pengunduhan file didukung langsung melalui web interface.
-- Progress upload/download ditampilkan secara real-time dengan status bar berbasis Web.
+- All user-facing features are fully accessible through the browser Web UI.
+- The Web UI remains highly responsive and non-blocking during chat, PM routing, uploads, or downloads.
+- All TCP socket communications are protected by thread-safe synchronization locks (`threading.Lock`), and events are serialized through the `WebSession.events` queue.
+- File uploads and downloads are fully supported directly from the web interface.
+- Upload and download progress indicators update in real-time on a web-based progress bar.
 
 ---
 
-## 4. Feature: Global Private Message
+## 4. Feature: Global Private Messaging (PM)
 
 ### Actor
 Authenticated user.
 
 ### Description
-User dapat mengirim private message ke user lain melalui Gateway, baik sender/recipient sedang di waiting room maupun sedang berada di room Process Server.
+Users can send private messages (PM) to other users through the Gateway, regardless of whether the sender or recipient is in the lobby or inside a Process Server chat room.
 
 ### Normal Flow
-1. Sender memilih user tujuan pada panel Online Users atau mengetik username tujuan di panel Private Message.
-2. Sender mengetik pesan dan menekan tombol **Send PM**.
-3. Client mengirim `PRIVATE_MESSAGE_SEND` ke Gateway.
-4. Gateway validasi token sender.
-5. Gateway validasi recipient ada.
-6. Gateway menyimpan PM ke database.
-7. Jika recipient online, Gateway mengirim `PRIVATE_MESSAGE_RECEIVED` ke socket Gateway milik recipient.
-8. Gateway mengirim status `delivered` ke sender.
-9. Jika recipient offline, Gateway menyimpan status `stored_offline`.
+1. The sender selects a target user in the Online Users panel or inputs the target username in the Private Message panel.
+2. The sender types the message and clicks the **Send PM** button.
+3. The client sends a `PRIVATE_MESSAGE_SEND` packet to the Gateway.
+4. The Gateway validates the sender's token.
+5. The Gateway verifies the recipient exists.
+6. The Gateway saves the PM to the database.
+7. If the recipient is currently online, the Gateway forwards `PRIVATE_MESSAGE_RECEIVED` to the recipient's Gateway socket.
+8. The Gateway returns a `delivered` status notification to the sender.
+9. If the recipient is offline, the Gateway stores the message with a status of `stored_offline`.
 
 ### Important Design Rule
-Client yang sudah join room tetap menjaga koneksi ke Gateway. Karena itu, PM dari waiting room ke user di room tetap bisa masuk.
+Clients inside a chat room maintain their active TCP connections to the Gateway. Thus, private messages can be sent between lobby users and active room users.
 
 ### Error Flow
-- Recipient tidak ditemukan -> `ERROR USER_NOT_FOUND`.
-- Message kosong -> `ERROR EMPTY_MESSAGE`.
-- Sender terkena rate limit -> `ERROR RATE_LIMIT_EXCEEDED`.
+- Recipient user not found -> Returns `ERROR USER_NOT_FOUND`.
+- Empty message payload -> Returns `ERROR EMPTY_MESSAGE`.
+- Sender rate limit exceeded -> Returns `ERROR RATE_LIMIT_EXCEEDED`.
 
 ### Acceptance Criteria
-- PM dari waiting room ke user di room berhasil.
-- PM antar user beda Process Server berhasil.
-- PM history tersimpan.
-- PM offline dapat dibaca setelah login.
+- Private messages can be sent between lobby users and active room users successfully.
+- Private messages can be sent between users connected to different Process Servers successfully.
+- PM history records are successfully saved and loaded.
+- Offline PMs are retrieved immediately after logging in.
 
 ---
 
@@ -160,25 +157,25 @@ Client yang sudah join room tetap menjaga koneksi ke Gateway. Karena itu, PM dar
 Authenticated user.
 
 ### Description
-Gateway menampilkan daftar user online global.
+The Gateway maintains and broadcasts a global list of online users.
 
-### Output
+### Output format
 ```txt
 username | status | active_room | server_id
-erlangga | waiting | - | -
-budi | in_room | FP-Jaringan | S1
-nadia | in_room | Kelompok-A | S2
+erlangga | waiting | -           | -
+budi     | in_room | FP-Jaringan | S1
+nadia    | in_room | Kelompok-A  | S2
 ```
 
 ### Status Values
-- `waiting`
-- `in_room`
-- `offline`
+- `waiting` (online in lobby)
+- `in_room` (active in a chat room)
+- `offline` (not logged in)
 
 ### Acceptance Criteria
-- User yang login muncul online.
-- User yang logout hilang/menjadi offline.
-- User yang join room berubah status `in_room`.
+- Newly logged-in users appear online.
+- Logged-out users are immediately removed or marked offline.
+- Users joining a room dynamically transition to the `in_room` status.
 
 ---
 
@@ -188,31 +185,31 @@ nadia | in_room | Kelompok-A | S2
 Authenticated user.
 
 ### Description
-User membuat room melalui Gateway. Gateway memilih Process Server berdasarkan load.
+A user creates a new chat room. The Gateway load balances the room to the least loaded Process Server.
 
 ### Normal Flow
-1. User mengisi nama room `FP-Jaringan` pada form Create Room dan menekan tombol **Create Room**.
-2. Client mengirim `CREATE_ROOM` ke Gateway.
-3. Gateway validasi nama room.
-4. Gateway memilih backend server hidup dengan beban paling ringan.
-5. Gateway menyimpan room dan room_mapping.
-6. Gateway membalas `ROOM_ASSIGNED`.
-7. Client otomatis connect ke Process Server yang diberikan.
-8. Process Server validasi token ke Gateway.
-9. Process Server membuat room context dan user join.
+1. The user inputs a room name `FP-Jaringan` and description, then clicks the **Create Room** button.
+2. The client sends a `CREATE_ROOM` packet to the Gateway.
+3. The Gateway validates the room name format.
+4. The Gateway selects the alive Process Server with the lowest load score.
+5. The Gateway stores the room entry and the `room_mapping` registry.
+6. The Gateway returns a `ROOM_ASSIGNED` packet containing host, port, and server details.
+7. The client automatically connects to the designated Process Server.
+8. The Process Server validates the client's token against the Gateway.
+9. The Process Server initializes the room context, and the client joins.
 
 ### Load Balancing Rule
-Prioritas pemilihan server:
-1. status server = alive,
-2. active_rooms paling sedikit,
-3. active_clients paling sedikit,
-4. fallback round-robin.
+Priority of server selection:
+1. Server status must be `alive`.
+2. Lowest count of `active_rooms`.
+3. Lowest count of `active_clients`.
+4. Fallback to round-robin on ties.
 
 ### Acceptance Criteria
-- Room baru tersimpan di database.
-- Room mapping tersimpan.
-- Creator menjadi room admin.
-- Client diarahkan ke Process Server yang benar.
+- The new room is recorded in the database.
+- The room-to-server mapping is stored.
+- The room creator becomes the room administrator (admin).
+- The client is successfully routed to the assigned Process Server.
 
 ---
 
@@ -222,24 +219,24 @@ Prioritas pemilihan server:
 Authenticated user.
 
 ### Description
-User join room yang sudah ada.
+A user joins an existing chat room.
 
 ### Normal Flow
-1. User memilih room `FP-Jaringan` dari tabel Rooms dan menekan tombol **Join Room**.
-2. Client mengirim `JOIN_ROOM` ke Gateway.
-3. Gateway mencari room_mapping.
-4. Gateway membalas lokasi Process Server.
-5. Client connect ke Process Server jika belum connect.
-6. Client mengirim `AUTH_BACKEND` ke Process Server.
-7. Process Server validasi token ke Gateway.
-8. Process Server menambahkan user ke room.
-9. Process Server mengirim chat history 50 pesan terakhir.
-10. Process Server broadcast system message: user joined.
+1. The user selects a room from the Rooms list and clicks the **Join** button.
+2. The client sends a `JOIN_ROOM` packet to the Gateway.
+3. The Gateway retrieves the server location from the `room_mapping`.
+4. The Gateway returns a `ROOM_LOCATION` packet.
+5. The client establishes a TCP socket connection to the designated Process Server.
+6. The client sends an `AUTH_BACKEND` packet to the Process Server.
+7. The Process Server validates the session token against the Gateway.
+8. The Process Server registers the user as active in the room context.
+9. The Process Server loads and transmits the last 50 room chat messages.
+10. The Process Server broadcasts a user join event to all other room members.
 
 ### Acceptance Criteria
-- Semua user dalam room yang sama diarahkan ke server yang sama.
-- User menerima chat history.
-- User lain menerima notifikasi join.
+- All users joining the same room are routed to the same Process Server.
+- Users receive historical room messages upon entry.
+- Existing room members receive real-time join notifications.
 
 ---
 
@@ -249,19 +246,19 @@ User join room yang sudah ada.
 Room member.
 
 ### Description
-User keluar dari room tetapi tetap login di Gateway.
+A user exits a chat room but remains logged in to the global Gateway.
 
 ### Normal Flow
-1. User menekan tombol **Leave Room** pada Room Panel.
-2. Client mengirim `LEAVE_ROOM` ke Process Server.
-3. Process Server mengubah membership menjadi inactive.
-4. Process Server broadcast system message.
-5. Client menutup room connection atau kembali ke waiting mode.
-6. Gateway update presence user menjadi waiting.
+1. The user clicks the **Leave Room** button.
+2. The client sends a `LEAVE_ROOM` packet to the Process Server.
+3. The Process Server updates the user's membership to inactive.
+4. The Process Server broadcasts a user departure notification.
+5. The client terminates the Process Server socket connection and returns to lobby mode.
+6. The Gateway updates the user's presence state back to `waiting`.
 
 ### Acceptance Criteria
-- User tidak menerima room broadcast setelah leave.
-- User tetap dapat PM melalui Gateway.
+- Users stop receiving room broadcasts immediately after leaving.
+- Users can still send and receive PMs through the Gateway.
 
 ---
 
@@ -271,25 +268,25 @@ User keluar dari room tetapi tetap login di Gateway.
 Room member.
 
 ### Description
-User mengirim pesan ke semua user dalam room.
+A user sends a message to all active participants inside the chat room.
 
 ### Normal Flow
-1. User mengetik pesan pada input Room Chat dan menekan tombol **Send**.
-2. Client mengirim `ROOM_CHAT_SEND` ke Process Server.
-3. Process Server validasi user anggota room.
-4. Process Server simpan pesan ke database.
-5. Process Server broadcast `ROOM_CHAT_BROADCAST` ke seluruh client dalam room.
-6. Sender menerima ACK.
+1. The user types a message and clicks the **Send** button.
+2. The client sends a `ROOM_CHAT_SEND` packet to the Process Server.
+3. The Process Server validates that the sender is an active member of the room.
+4. The Process Server persists the message in the database.
+5. The Process Server broadcasts a `ROOM_CHAT_BROADCAST` packet to all clients inside the room.
+6. The sender receives an acknowledgment (ACK).
 
 ### Error Flow
-- User belum join room -> `ERROR NOT_IN_ROOM`.
-- Message kosong -> `ERROR EMPTY_MESSAGE`.
-- User terkena rate limit -> `ERROR RATE_LIMIT_EXCEEDED`.
+- User has not joined the room -> Returns `ERROR NOT_IN_ROOM`.
+- Empty message payload -> Returns `ERROR EMPTY_MESSAGE`.
+- Sender rate limit exceeded -> Returns `ERROR RATE_LIMIT_EXCEEDED`.
 
 ### Acceptance Criteria
-- Pesan hanya diterima user di room yang sama.
-- Pesan masuk history.
-- Pesan memiliki timestamp.
+- Messages are only received by users inside the same room.
+- Messages are saved in room history database.
+- Messages contain accurate creation timestamps.
 
 ---
 
@@ -299,18 +296,18 @@ User mengirim pesan ke semua user dalam room.
 Room member.
 
 ### Description
-User dapat melihat history room.
+Users can retrieve historical chat messages from the room.
 
 ### Normal Flow
-1. User menekan tombol **Refresh History** atau history dimuat otomatis saat join room.
-2. Client mengirim `ROOM_HISTORY_REQUEST`.
-3. Process Server query database.
-4. Process Server mengirim 50 pesan terakhir.
+1. The user clicks the **Refresh History** button, or the history loads automatically upon joining.
+2. The client sends a `ROOM_HISTORY_REQUEST` packet.
+3. The Process Server queries the database for the room.
+4. The Process Server returns the last 50 chat messages.
 
 ### Acceptance Criteria
-- User baru join menerima history otomatis.
-- User bisa request history manual.
-- Pesan system/file event bisa ikut ditampilkan.
+- New members automatically receive history logs when joining.
+- Members can manually request history updates.
+- System events and file upload announcements are included in history logs.
 
 ---
 
@@ -320,17 +317,17 @@ User dapat melihat history room.
 Room member.
 
 ### Description
-User melihat file yang tersedia di room.
+Users can view files uploaded in the active chat room.
 
 ### Normal Flow
-1. User membuka tab/panel **Files** atau menekan tombol **Refresh Files**.
-2. Client mengirim `FILE_LIST_REQUEST`.
-3. Process Server query file metadata.
-4. Client menerima daftar file.
+1. The user opens the **Files** panel or clicks the **Refresh Files** button.
+2. The client sends a `FILE_LIST_REQUEST` packet.
+3. The Process Server queries file metadata from the database.
+4. The client receives the file listing.
 
-### Output
+### Output format
 ```txt
-ID | Filename | Size | Uploader | Status | Uploaded At
+ID | Filename    | Size   | Uploader | Status    | Uploaded At
 12 | laporan.pdf | 2.4 MB | erlangga | available | 2026-06-09 20:00
 ```
 
@@ -342,33 +339,33 @@ ID | Filename | Size | Uploader | Status | Uploaded At
 Room member.
 
 ### Description
-User upload file ke room melalui Process Server.
+Users upload files to the room through the Process Server.
 
 ### Normal Flow
-1. User menekan tombol **Upload File** dan memilih `laporan.pdf` melalui file picker.
-2. Client menghitung file size, total chunk, checksum SHA-256.
-3. Client mengirim `UPLOAD_INIT`.
-4. Process Server membuat transfer session.
-5. Process Server membalas `UPLOAD_READY`.
-6. Client mengirim chunk satu per satu.
-7. Process Server mengirim `CHUNK_ACK`.
-8. Client menampilkan progress.
-9. Client mengirim `UPLOAD_FINISH`.
-10. Process Server menghitung checksum.
-11. Jika valid, metadata file status `available`.
-12. Process Server broadcast system event file baru.
+1. The user clicks **Upload File** and selects a file (e.g., `laporan.pdf`) using the file picker.
+2. The client calculates the file size, total chunk count, and SHA-256 checksum.
+3. The client sends an `UPLOAD_INIT` packet.
+4. The Process Server initializes a transfer session.
+5. The Process Server responds with an `UPLOAD_READY` packet containing the transfer ID.
+6. The client uploads chunks sequentially (or concurrently up to 4 parallel workers).
+7. The Process Server acknowledges chunk completion with a `CHUNK_ACK`.
+8. The client displays the transfer progress bar.
+9. The client sends an `UPLOAD_FINISH` packet.
+10. The Process Server computes the SHA-256 checksum of the completed file on disk.
+11. If the computed checksum matches, the file status is marked as `available`.
+12. The Process Server broadcasts a system event announcing the new file.
 
 ### Error Flow
-- File terlalu besar -> `ERROR FILE_TOO_LARGE`.
-- File path tidak valid -> client error.
-- Checksum gagal -> `ERROR CHECKSUM_FAILED`.
-- Transfer timeout -> `ERROR TRANSFER_TIMEOUT`.
+- File size exceeds limit -> Returns `ERROR FILE_TOO_LARGE`.
+- Invalid file path -> Client-side error.
+- Checksum verification failed -> Returns `ERROR CHECKSUM_FAILED`.
+- Transfer session timed out -> Returns `ERROR TRANSFER_TIMEOUT`.
 
 ### Acceptance Criteria
-- File tersimpan di storage Process Server.
-- Metadata file tersimpan di database.
-- Checksum cocok.
-- User lain mendapat notifikasi file baru.
+- The uploaded file is stored in the Process Server's storage directory.
+- File metadata is persisted in the database.
+- Checksum is verified and correct.
+- Other room members receive real-time notifications about the new file.
 
 ---
 
@@ -378,23 +375,23 @@ User upload file ke room melalui Process Server.
 Room member.
 
 ### Description
-User download file dari room.
+Users download uploaded files from the room.
 
 ### Normal Flow
-1. User memilih file pada tabel File List dan menekan tombol **Download Selected**.
-2. Client mengirim `DOWNLOAD_REQUEST`.
-3. Process Server validasi file tersedia.
-4. Process Server mengirim `DOWNLOAD_READY`.
-5. Process Server mengirim chunk satu per satu.
-6. Client menulis chunk ke file lokal.
-7. Client menampilkan progress.
-8. Setelah selesai, client menghitung checksum.
-9. Client menampilkan hasil valid/invalid.
+1. The user selects a file in the file listing and clicks the **Download** button.
+2. The client sends a `DOWNLOAD_REQUEST` packet.
+3. The Process Server verifies the file is available.
+4. The Process Server responds with a `DOWNLOAD_READY` packet.
+5. The Process Server transmits file chunks sequentially.
+6. The client writes bytes to the local target file.
+7. The client updates the download progress bar.
+8. Upon completion, the client computes the SHA-256 checksum.
+9. The client validates the checksum against the original metadata hash.
 
 ### Acceptance Criteria
-- File hasil download sama dengan file server.
-- Checksum valid.
-- Progress tampil.
+- The downloaded file matches the server copy bit-for-bit.
+- Checksum verifies successfully.
+- Progress bar functions correctly.
 
 ---
 
@@ -404,20 +401,20 @@ User download file dari room.
 Room member.
 
 ### Description
-Upload/download dapat dilanjutkan setelah disconnect.
+File uploads and downloads can be resumed after network disconnection.
 
-### Normal Flow Download Resume
-1. Client download file.
-2. Koneksi putus di chunk 40.
-3. Client reconnect ke Process Server.
-4. Client mengirim `RESUME_TRANSFER` dengan transfer_id dan last_chunk.
-5. Server melanjutkan dari chunk 41.
-6. Transfer selesai dan checksum valid.
+### Normal Flow (Download/Upload Resume)
+1. Client is downloading/uploading a file.
+2. Network connection drops at chunk 40.
+3. Client reconnects and authenticates with the Process Server.
+4. Client sends a `RESUME_TRANSFER` request with the `transfer_id` and the last successfully written chunk index.
+5. The server resumes sending/receiving from chunk 41.
+6. The transfer completes and verifies successfully.
 
 ### Acceptance Criteria
-- Transfer tidak mulai dari nol.
-- Resume status tercatat di database.
-- Checksum tetap valid setelah resume.
+- The file transfer resumes without re-transmitting already completed chunks.
+- Resumed transaction states are logged in the database.
+- Checksum remains valid after resume operations.
 
 ---
 
@@ -427,9 +424,9 @@ Upload/download dapat dilanjutkan setelah disconnect.
 Process Server.
 
 ### Description
-Process Server mengirim heartbeat ke Gateway.
+Process Servers transmit periodic heartbeat packets to the Gateway.
 
-### Payload
+### Payload Example
 ```json
 {
   "server_id": "S1",
@@ -440,8 +437,8 @@ Process Server mengirim heartbeat ke Gateway.
 ```
 
 ### Acceptance Criteria
-- Gateway tahu server hidup/mati.
-- Gateway tidak mengarahkan room baru ke server down.
+- The Gateway monitors server status (online/offline).
+- The Gateway excludes offline servers from room load balancing.
 
 ---
 
@@ -451,23 +448,23 @@ Process Server mengirim heartbeat ke Gateway.
 Server operator.
 
 ### Description
-Script melakukan simulasi beban.
+Test scripts simulate user loads.
 
 ### Scenario
-- 30 client login.
-- 10 room dibuat.
-- 100 pesan room dikirim.
-- 50 PM dikirim.
-- 5 file 1 MB upload/download.
-- 5 malformed packet dikirim.
+- 30 concurrent clients logging in.
+- 10 rooms created.
+- 100 room chat messages sent.
+- 50 PMs routed.
+- 5 files (1MB each) uploaded and downloaded.
+- 5 malformed/corrupted packets transmitted to test robustness.
 
-### Output
-- total success,
-- total failed,
-- average latency,
-- max latency,
-- throughput,
-- error rate.
+### Output Reports
+- Total success count
+- Total failed count
+- Average latency
+- Max latency
+- Network throughput
+- Error rate percentages
 
 ---
 
@@ -477,18 +474,18 @@ Script melakukan simulasi beban.
 Room member.
 
 ### Description
-User dapat menambahkan atau menghapus reaksi emoji (seperti 👍, ❤️, 😂, dll.) pada pesan obrolan di dalam room. Reaksi didefinisikan per user per pesan dan dipancarkan ke seluruh anggota room secara real-time.
+Users can add or remove emoji reactions (such as 👍, ❤️, 😂, etc.) on chat messages inside the room. Reactions are tracked per user per message and broadcast to all room members in real-time.
 
 ### Normal Flow
-1. User mengarahkan kursor ke pesan obrolan di Web UI.
-2. User memilih salah satu emoji dari menu reaksi.
-3. Client mengirim `ROOM_MESSAGE_REACTION` dengan payload `message_id`, `emoji`, dan `action = 'add'` atau `'remove'`.
-4. Process Server memproses permintaan, menyimpan perubahan reaksi di database `message_reactions`, dan memancarkan `ROOM_REACTION_BROADCAST` ke seluruh anggota room.
-5. Elemen UI penerima memperbarui jumlah reaksi emoji dan daftar pemberi reaksi secara dinamis.
+1. The user hovers over a chat message in the Web UI.
+2. The user selects an emoji from the reaction menu overlay.
+3. The client sends a `ROOM_MESSAGE_REACTION` packet with `message_id`, `emoji`, and `action = 'add'` or `'remove'`.
+4. The Process Server processes the request, updates the `message_reactions` database, and broadcasts `ROOM_REACTION_BROADCAST` to all room members.
+5. Receiving client UIs dynamically update the emoji counts and reaction tooltips.
 
 ### Acceptance Criteria
-- Reaksi emoji tersimpan dan terhapus dengan benar di database.
-- Perubahan reaksi diperbarui secara dinamis tanpa me-refresh chat.
+- Emoji reactions are correctly persisted or removed from the database.
+- Reactions update dynamically without reloading the chat page.
 
 ---
 
@@ -498,19 +495,19 @@ User dapat menambahkan atau menghapus reaksi emoji (seperti 👍, ❤️, 😂, 
 Room owner (admin).
 
 ### Description
-Pemilik/pembuat room memiliki hak administratif untuk mendepak (*kick*) pengguna lain dari room.
+The owner/creator of a chat room has administrative rights to kick other users from the room.
 
 ### Normal Flow
-1. Admin menekan tombol **Kick** di sebelah nama pengirim pesan (atau dari daftar anggota room) di Web UI.
-2. Client mengirim `ROOM_KICK_USER` dengan payload `username` target.
-3. Process Server melakukan pengecekan status kepemilikan room. Jika pengirim adalah owner, target dipaksa keluar dari room (status presensi dirujuk ke waiting room) dan Gateway diinfokan.
-4. Process Server menyiarkan (broadcast) `SYSTEM_EVENT` bahwa user bersangkutan telah dikeluarkan oleh owner.
-5. Client target menerima notifikasi dikeluarkan dan dialihkan kembali ke Dashboard/Waiting Room secara otomatis.
+1. The admin clicks the **Kick** button next to a user's name (or in the member list) in the Web UI.
+2. The client sends a `ROOM_KICK_USER` packet with the target `username`.
+3. The Process Server verifies the sender is the room owner. If valid, the target is kicked from the room context (their presence resets to the lobby/waiting room), and the Gateway is notified.
+4. The Process Server broadcasts a `SYSTEM_EVENT` stating that the user was kicked by the owner.
+5. The target client receives the kick event and is automatically redirected back to the Lobby/Dashboard.
 
 ### Acceptance Criteria
-- Hanya pemilik room asli yang dapat mengeluarkan anggota room.
-- Anggota lain tidak memiliki tombol kick atau ditolak dengan error `PERMISSION_DENIED`.
-- Anggota yang di-kick dialihkan keluar secara instan dan daftar anggota diperbarui.
+- Only the original room creator/owner can kick members.
+- Other members do not see the kick button, and unauthorized requests are rejected with a `PERMISSION_DENIED` error.
+- Kicked members are evicted instantly and the active member list is updated.
 
 ---
 
@@ -520,17 +517,17 @@ Pemilik/pembuat room memiliki hak administratif untuk mendepak (*kick*) pengguna
 Room owner (admin).
 
 ### Description
-Pemilik/pembuat room dapat menghapus file yang telah diunggah di dalam room. Penghapusan ini bersifat logis dan aman.
+The room owner can delete files uploaded within their room. Deletion is logical, secure, and clean.
 
 ### Normal Flow
-1. Admin menekan tombol **Delete File** pada kartu file di chat room Web UI.
-2. Client mengirim `ROOM_DELETE_FILE` dengan payload `file_id`.
-3. Process Server memverifikasi hak akses admin. Jika valid, status file diubah menjadi `'deleted'` di tabel `files` dan chat file card diset `is_deleted = 1` di tabel `room_messages`.
-4. Process Server menyiarkan `ROOM_DELETE_FILE_BROADCAST` berisi `message_id` dan `file_id` ke seluruh anggota room, serta menyiarkan pesan sistem `SYSTEM_EVENT`.
-5. Semua browser klien di room mendeteksi broadcast dan menghapus kartu file dari DOM layar mereka seketika.
-6. Permintaan unduhan file yang telah dihapus akan ditolak dengan error `FILE_NOT_FOUND`.
+1. The admin clicks the **Delete File** button on a file card in the room's Web UI chat area.
+2. The client sends a `ROOM_DELETE_FILE` packet with the `file_id`.
+3. The Process Server verifies owner permissions. If valid, the file status is updated to `'deleted'` in the `files` table and the message card is marked `is_deleted = 1` in the `room_messages` table.
+4. The Process Server broadcasts a `ROOM_DELETE_FILE_BROADCAST` containing the `message_id` and `file_id` to room members and emits a system notification message.
+5. All client browsers in the room detect the broadcast and remove the file card from their DOM instantly.
+6. Download requests for deleted files are rejected with a `FILE_NOT_FOUND` error.
 
 ### Acceptance Criteria
-- Hanya owner yang dapat menghapus file.
-- Pesan file hilang seketika dari layar semua user yang online di room.
-- Berkas yang telah dihapus tidak dapat diunduh lagi.
+- Only the owner can delete files.
+- The file message card disappears instantly from all online clients in the room.
+- Deleted files can no longer be downloaded.

@@ -1,32 +1,43 @@
 # Changelog - NetCourier
 
-All notable changes to this project documentation will be documented in this file.
+All notable changes to this project will be documented in this file.
+
+---
+
+## [1.1.0] - 2026-06-14
+
+### Added
+- **Dynamic Chunk Scaling**: Implemented auto-scaling of chunk sizes (1MB up to 16MB) depending on the file size. For files like 1GB, the system dynamically scales the chunk size to 11MB to prevent localhost TCP port exhaustion (`TIME_WAIT` saturation).
+- **Auto-Initialization of Test Rooms**: Updated the `full_verification.py` script to automatically initialize the 'General' room dynamically if it is not present in a clean database.
+
+### Changed
+- **Deterministic Handshake Sync**: Standardized chunk calculations in both the Web UI frontend (`app.js`) and HTTP Web API Bridge (`server.py`) to keep the calculated chunk sizes completely deterministic and support pause/resume out-of-the-box.
 
 ---
 
 ## [1.0.0] - 2026-06-14
 
 ### Added
-- **Web-based UI (HTML/CSS/JS SPA)**: Menggantikan seluruh konteks Tkinter lama dengan antarmuka web modern di browser yang dilayani via HTTP API Bridge (`web_api/server.py`).
-- **Emoji Reactions**: Memberikan kemampuan bagi user room untuk memberi reaksi emoji secara real-time.
-- **Admin Kick & File Deletion**: Pemilik room dapat mendepak user lain dan menghapus file secara logis.
-- **ROOM_DELETE_FILE_BROADCAST**: Broadcast dinamis untuk menghapus bubble chat file dari layar semua user room secara real-time saat file dihapus oleh admin.
-- **Paralel Chunk Upload**: Fitur browser Web UI untuk mengunggah berkas biner chunk 1MB secara paralel (hingga 4 konkurensi).
-- **Safe Out-of-order Writes**: Mekanisme Process Server untuk menulisi data chunk paralel pada offset file yang tepat (`seek(offset)`) dan aman.
-- **TCP_NODELAY**: Socket TCP dikonfigurasi tanpa delay Nagle di seluruh pipeline localhost (Gateway, Server S1/S2, Web API).
+- **Web-based UI (HTML/CSS/JS SPA)**: Replaced the legacy Tkinter GUI with a modern, responsive Single Page Application Web UI, served through an HTTP/SSE Web API Bridge (`web_api/server.py`).
+- **Emoji Reactions**: Enabled real-time emoji reactions (add/remove) on messages in chat rooms.
+- **Admin Kick & File Deletion**: Granted room owners the administrative power to kick members and delete uploaded files.
+- **ROOM_DELETE_FILE_BROADCAST**: Implemented dynamic broadcasting of file deletion events to instantly remove file cards from the DOM of all active room members.
+- **Parallel Chunk Upload**: Implemented concurrent file slicing and chunk uploading (up to 4 parallel workers) directly in the browser's Web UI.
+- **Safe Out-of-order Writes**: Process Server now supports safe parallel block writing at specific file offsets using `seek(offset)`.
+- **TCP_NODELAY Option**: Enabled Nagle's algorithm bypass across all localhost pipeline sockets (Gateway, S1/S2, and Web API Bridge) to eliminate latency overhead.
 
 ### Changed
-- **Bypass Body Decodes**: Mengabaikan parse UTF-8 pada REST API upload chunk di Web API server, menurunkan pemakaian CPU secara drastis.
-- **Progress Caching (DB Batching)**: Process Server menyimpan progress transfer dalam in-memory cache dan hanya mengkomit ke database SQLite setiap 20 chunk sekali, melesatkan performa localhost.
-- **Logical Delete**: File didelete secara logis dari DB dan ditolak secara aman jika ada request download berkas yang bersangkutan.
+- **Bypass Body Decodes**: Disabled UTF-8 decoding for binary REST upload request bodies in the Web API, decreasing server-side CPU utilization.
+- **Progress Caching (DB Batching)**: Process Server now buffers file transfer progress updates in memory and batches SQLite database commits every 20 chunks to speed up transfer rates on localhost.
+- **Logical File Deletion**: Added logical file deletion in the database, blocking any subsequent download attempts.
 
 ### Fixed
-- **File Deletion Parameter**: Tombol *delete* mengirimkan parameter `file_id` riil dan memperbarui pesan secara lokal tanpa re-koneksi room (`joinRoom()`) yang memicu error "Failed to locate room".
-- **Dynamic DOM updates**: Bubble chat reaksi emoji dan berkas terhapus kini memperbarui DOM UI secara instan via SSE/polling events.
+- **File Deletion Parameter**: Resolved parameter mismatch by passing real `file_id` during deletes and updating DOM nodes dynamically without invoking full room refreshes.
+- **Dynamic DOM updates**: Integrated SSE and API polling to dynamically refresh emoji reactions and user lists.
 
 ---
 
 ## [0.1.0] - 2026-06-09
 
 ### Added
-- Struktur dokumentasi awal untuk project NetCourier.
+- Initial structural documentation for the NetCourier project.

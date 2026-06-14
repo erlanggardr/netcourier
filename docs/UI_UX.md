@@ -1,31 +1,31 @@
-# UI/UX Specification - NetCourier Web Client GUI
+# UI/UX Specification - NetCourier Web Client
 
-NetCourier menggunakan **Web Client GUI** (HTML/CSS/JS) sebagai UI utama client. Client **tidak boleh berbasis CLI/TUI**. CLI hanya boleh digunakan untuk menjalankan Gateway, Process Server, dan script testing.
+NetCourier utilizes a modern **Web Client GUI** (HTML/CSS/JS) as its primary user interface. The client **must not be CLI/TUI-based**. Command-line interfaces (CLI) are reserved strictly for launching the Gateway, Process Servers, and running load testing tools.
 
-UI harus sederhana, stabil, mudah didemokan, dan tetap memperlihatkan konsep jaringan utama: koneksi Gateway, koneksi Process Server, PM global, room chat, file transfer, progress transfer, dan status koneksi.
+The UI must be clean, stable, easy to demonstrate, and explicitly visualize core network concepts: active Gateway connections, Process Server connectivity, global PM routing, room chat, chunked file transfer progress, and live latency status.
 
 ---
 
-## 1. UI Mode
+## 1. UI Modes
 
-Client memiliki dua area utama:
+The client interface is split into two primary areas:
 
-1. **Gateway / Waiting Area**
-   - User sudah login tetapi belum tentu berada di room.
-   - PM global aktif.
-   - Online user list aktif.
-   - Room list aktif.
-   - Create/join room tersedia.
+1. **Gateway Lobby / Waiting Area**
+   - User is logged in but has not entered a specific chat room.
+   - Global PM routing is active.
+   - Global online users directory is active.
+   - Active rooms listing directory is active.
+   - Creating and joining rooms are available.
 
-2. **Room Area**
-   - User berada di room tertentu.
-   - Room chat aktif.
-   - Room member list aktif.
-   - File list aktif.
-   - File upload/download aktif.
-   - PM global tetap aktif melalui koneksi Gateway.
+2. **Room View Area**
+   - User is actively inside a specific chat room.
+   - Room chat broadcasting is active.
+   - Room participant listing is active.
+   - Room files listing is active.
+   - Chunked file uploads and downloads are active.
+   - Global PM routing remains active via the background Gateway connection.
 
-Desain paling praktis adalah satu window utama dengan layout tab atau panel:
+The layout features a Single Page Application (SPA) dashboard design:
 
 ```txt
 +--------------------------------------------------------------+
@@ -44,36 +44,36 @@ Desain paling praktis adalah satu window utama dengan layout tab atau panel:
 
 ## 2. Window Structure
 
-### 2.1 Auth Window
+### 2.1 Authentication Window
 
-Komponen:
+Components:
 - App title: NetCourier.
 - Gateway host input.
 - Gateway port input.
 - Login form:
-  - username entry,
-  - password entry,
-  - Login button.
-- Register form:
-  - username entry,
-  - display name entry,
-  - password entry,
-  - Register button.
-- Status label untuk error/success.
+  - Username input.
+  - Password input.
+  - Login trigger button.
+- Registration form:
+  - Username input.
+  - Display name input.
+  - Password input.
+  - Register trigger button.
+- Status labels to show errors or success notifications.
 
 Rules:
-- Password field menggunakan masking.
-- Tombol Login/Register disabled saat request sedang diproses.
-- Error login tampil di status label atau messagebox.
-- Setelah login sukses, buka Main Window.
+- Password fields must use character masking.
+- Login/Register buttons are disabled while network requests are in progress.
+- Authentication errors are displayed in status labels or modal alert dialogues.
+- Upon successful authentication, the main client dashboard is loaded.
 
 ---
 
 ## 3. Main Window Layout
 
-Main Window muncul setelah login berhasil.
+The Main Window loads immediately after a successful login.
 
-Rekomendasi layout:
+Layout:
 
 ```txt
 +--------------------------------------------------------------------------------+
@@ -86,14 +86,14 @@ Rekomendasi layout:
 | - budi      in_room     |                                                      |
 | - nadia     waiting     | Chat History                                         |
 |                         | ---------------------------------------------------- |
-| Private Message         | [20:20] budi: Halo                                  |
-| To: [budi         v]    | [20:21] erlangga: Aku upload laporan ya             |
+| Private Message         | [20:20] budi: Hello                                  |
+| To: [budi         v]    | [20:21] erlangga: I am uploading the report          |
 | Message: [          ]   |                                                      |
 | [Send PM] [History]     | Message: [                              ] [Send]     |
 |                         |                                                      |
 | Rooms                   | Files                                                |
-| [Create Room input]     | ID | Filename | Size | Uploader | Status           |
-| [Create]                | 1  | laporan.pdf | 2.4 MB | erlangga | available   |
+| [Create Room input]     | ID | Filename    | Size   | Uploader | Status        |
+| [Create]                | 1  | laporan.pdf | 2.4 MB | erlangga | available     |
 | Room table              | [Upload] [Download Selected] [Resume]               |
 +-------------------------+------------------------------------------------------+
 | Transfer Progress: laporan.pdf [########------] 67% | 780 KB/s | ETA 2s        |
@@ -103,257 +103,245 @@ Rekomendasi layout:
 
 ---
 
-## 4. Auth Flow UX
+## 4. Authentication Flow UX
 
-### 4.1 Register
+### 4.1 Registration
 
-User flow:
-1. User membuka aplikasi `python client/main.py`.
-2. User mengisi Gateway Host dan Gateway Port.
-3. User mengisi username, display name, dan password.
-4. User menekan tombol **Register**.
-5. Client mengirim packet `REGISTER` ke Gateway.
-6. Jika berhasil, UI menampilkan pesan: `Register success. Please login.`
+User workflow:
+1. The user opens the local client app launcher.
+2. The user inputs the Gateway Host IP and Port.
+3. The user inputs their desired username, display name, and password.
+4. The user clicks the **Register** button.
+5. The client transmits a `REGISTER` packet to the Gateway.
+6. On success, the UI displays: `Register success. Please login.`
 
-Error:
-- Username kosong -> `Username is required.`
-- Username sudah dipakai -> `Username already taken.`
-- Password terlalu pendek -> `Password is too short.`
-- Gateway tidak tersambung -> `Cannot connect to Gateway.`
+Error Handling:
+- Username empty -> `Username is required.`
+- Username already taken -> `Username already taken.`
+- Password too short -> `Password is too short.`
+- Gateway connection failed -> `Cannot connect to Gateway.`
 
 ### 4.2 Login
 
-User flow:
-1. User mengisi username dan password.
-2. User menekan tombol **Login**.
-3. Client mengirim packet `LOGIN` ke Gateway.
-4. Jika berhasil, Auth Window diganti ke Main Window.
-5. Status bar menampilkan `Gateway connected`.
+User workflow:
+1. The user inputs their username and password.
+2. The user clicks the **Login** button.
+3. The client transmits a `LOGIN` packet to the Gateway.
+4. On success, the Auth view is replaced by the Main Dashboard.
+5. The status bar displays `Gateway connected`.
 
-Error:
-- Credential salah -> `Invalid username or password.`
+Error Handling:
+- Incorrect credentials -> `Invalid username or password.`
 - Duplicate login -> `User already logged in.`
-- Timeout -> `Login timeout. Please try again.`
+- Connection timeout -> `Login timeout. Please try again.`
 
 ---
 
-## 5. Waiting Area UX
+## 5. Lobby/Waiting Area UX
 
-Waiting Area adalah area global setelah login.
+The lobby is the global landing area after logging in.
 
-Komponen:
+Components:
 - Online Users table.
-- Private Message panel.
-- Room List table.
-- Create Room form.
-- Join Room button.
-- PM History button.
+- Private Message routing panel.
+- Active Rooms directory list.
+- Create Room input form.
+- Join Room trigger buttons.
+- PM History panel.
 
 ### 5.1 Online Users Table
 
-Kolom:
+Columns:
 - Username.
 - Display name.
-- Status: `waiting`, `in_room`, `offline` jika ditampilkan dari history.
-- Active room.
-- Server ID.
+- Status (`waiting`, `in_room`, `offline`).
+- Active room name.
+- Process Server ID.
 
-Action:
-- Double click user -> isi target PM.
-- Refresh button -> request `ONLINE_USERS_REQUEST`.
+Actions:
+- Double-clicking a user entry automatically selects them as the target for a Private Message.
+- The refresh action issues a `ONLINE_USERS_REQUEST` update.
 
 ### 5.2 Private Message Panel
 
-Komponen:
+Components:
 - Recipient dropdown/input.
-- Message text entry.
-- Send PM button.
-- PM History button.
-- PM conversation display.
+- Message text entry area.
+- Send PM trigger button.
+- PM History loading button.
+- Conversation thread display.
 
-Tampilan pesan:
-
+Message display format:
 ```txt
-[PM from budi | 20:15:01] Bro, file sudah aku download.
-[PM to budi | delivered] Oke sip.
+[PM from budi | 20:15:01] Bro, I downloaded the file.
+[PM to budi | delivered] Awesome, thanks.
 [PM to nadia | stored_offline] User offline. Message saved.
 ```
 
 Rules:
-- PM masuk harus tetap tampil walaupun user sedang berada di room.
-- PM prefix harus berbeda dari room chat.
-- PM history diambil dari Gateway/Central DB.
+- Incoming PMs must display in real-time even if the user is currently inside a chat room.
+- Private message formats must be visually distinct from room chat broadcasts.
+- PM history logs are retrieved from the Gateway/Central Database.
 
-### 5.3 Room List
+### 5.3 Room List Table
 
-Kolom:
+Columns:
 - Room name.
-- Server ID.
-- Active users.
-- File count.
-- Visibility.
+- Hosting Server ID.
+- Active user count.
+- Total files uploaded.
+- Visibility (public/private).
 
-Action:
-- Create Room -> request ke Gateway.
-- Join Room -> Gateway mengembalikan lokasi Process Server.
-- Setelah join sukses, Room Panel aktif.
+Actions:
+- **Create Room:** Requests a new room allocation from the Gateway.
+- **Join Room:** Gateway returns the Process Server details, and the client connects.
+- Upon joining, the Room Panel interface is activated.
 
 ---
 
 ## 6. Room Area UX
 
-Room Area aktif setelah user join room.
+The Room Panel is activated after a user joins a chat room.
 
-Komponen:
-- Room header.
-- Room chat history.
-- Message input.
-- Send button.
-- Room members list.
-- File list.
-- Upload button.
-- Download selected button.
-- Resume transfer button.
-- Progress bar transfer.
+Components:
+- Room header (displaying room name, host server, latency).
+- Chat message history log.
+- Text input box and Send button.
+- Room participant listing.
+- Files listing database table.
+- Upload file control.
+- Download selected file control.
+- Resume transfer control.
+- Live file transfer progress bar.
 
-### 6.1 Room Chat
+### 6.1 Room Chat History
 
-Tampilan:
-
+Format:
 ```txt
-[ROOM FP-Jaringan | 20:20:01] budi: Halo semua
-[ROOM FP-Jaringan | 20:20:05] erlangga: Aku upload laporan ya
+[ROOM FP-Jaringan | 20:20:01] budi: Hello everyone
+[ROOM FP-Jaringan | 20:20:05] erlangga: I am uploading the report
 [SYSTEM | 20:20:06] erlangga started uploading laporan.pdf
 ```
 
 Rules:
-- Room chat hanya untuk room yang sedang aktif.
-- Room chat dikirim ke Process Server, bukan Gateway.
-- Chat history dimuat saat join room.
-- Text area chat read-only.
-- Message input clear setelah send sukses.
+- Room chat strictly displays messages broadcasted within the currently active room.
+- Chat messages are sent to the assigned Process Server, bypassing the Gateway.
+- Last 50 messages are automatically retrieved upon entering the room.
+- Chat display logs are read-only.
+- Input fields clear instantly upon successful transmission.
 
-### 6.2 Room Members
+### 6.2 Room Members List
 
-Kolom:
+Columns:
 - Username.
-- Role.
-- Status.
+- Member role (admin/member).
+- Presence status.
 
-Action:
-- Select member -> bisa langsung dijadikan target PM.
+Actions:
+- Selecting a member allows sending a PM to them directly.
 
-### 6.3 File List
+### 6.3 File List Table
 
-Kolom:
+Columns:
 - File ID.
 - Filename.
 - Size.
 - Uploader.
-- Checksum status.
-- Upload time.
-- Availability status.
+- Integrity status (available/corrupted).
+- Upload date/time.
 
-Action:
-- Upload -> buka file picker.
-- Download Selected -> download file terpilih.
-- Resume -> lanjutkan transfer interrupted.
-- Refresh -> request file list terbaru.
+Actions:
+- **Upload:** Opens the local browser file dialog.
+- **Download:** Downloads the selected file.
+- **Resume:** Resumes an interrupted transfer.
+- **Refresh:** Requests the latest file listing from the Process Server.
 
 ---
 
 ## 7. File Transfer UX
 
-### 7.1 Upload
+### 7.1 Uploading Files
 
-User flow:
-1. User menekan tombol **Upload**.
-2. UI membuka file picker.
-3. User memilih file.
-4. UI menampilkan metadata file:
-   - filename,
-   - size,
-   - chunk size,
-   - total chunks,
-   - checksum preview.
-5. User konfirmasi upload.
-6. Upload berjalan pada worker thread.
-7. Progress bar diperbarui melalui UI event queue.
-8. Setelah selesai, UI menampilkan checksum valid/failed.
+User workflow:
+1. The user clicks the **Upload** button.
+2. The browser opens a file dialogue.
+3. The user selects a file.
+4. The UI displays file metadata: name, size, chunk size, total chunks, and SHA-256 hash.
+5. The user confirms the upload.
+6. The upload process executes in background threads.
+7. The progress bar updates dynamically via the event queue.
+8. Upon completion, the client displays a success/failure checksum message.
 
-Progress display:
-
+Progress bar formatting:
 ```txt
 Uploading laporan.pdf to Server S1
 67% | 1.60 MB / 2.40 MB | 780 KB/s | ETA 2s
 ```
 
-### 7.2 Download
+### 7.2 Downloading Files
 
-User flow:
-1. User memilih file dari File List.
-2. User menekan tombol **Download Selected**.
-3. UI membuka folder picker atau menggunakan folder default `downloads/`.
-4. Download berjalan pada worker thread.
-5. Progress bar diperbarui.
-6. Setelah selesai, UI menampilkan lokasi file dan checksum status.
+User workflow:
+1. The user selects a file entry from the File List.
+2. The user clicks the **Download** button.
+3. The browser prompts for a download folder or uses the default `downloads/` directory.
+4. The download executes in background threads.
+5. The progress bar updates dynamically.
+6. Upon completion, the client validates the file checksum and saves it.
 
 ### 7.3 Resume Transfer
 
-Jika transfer interrupted:
-- Transfer muncul di transfer panel dengan status `interrupted`.
-- User dapat menekan tombol **Resume**.
-- Client mengirim `RESUME_TRANSFER`.
-- Progress lanjut dari chunk terakhir yang sudah sukses.
+If a transfer is interrupted:
+- The transaction entry appears in the Transfer Panel marked as `interrupted`.
+- The user can click the **Resume** button.
+- The client sends a `RESUME_TRANSFER` handshake.
+- The progress bar resumes loading from the last written chunk index.
 
 ---
 
 ## 8. Status Bar
 
-Status bar harus selalu terlihat.
+The status bar must be persistently visible at the bottom of the client window.
 
-Isi status bar:
-- Gateway connection: connected/disconnected.
-- Current room server: S1/S2/disconnected.
-- Current room name.
-- Last latency.
-- Last error pendek.
+Status bar details:
+- Gateway connection status (connected/disconnected).
+- Process Server status (connected/disconnected, Server ID, Host IP).
+- Current active room name.
+- Live network latency (RTT).
+- Last error message preview.
 
-Contoh:
-
+Example:
 ```txt
 Gateway: connected | Room: FP-Jaringan @ S1 | Latency: 12 ms | Status: Ready
 ```
 
 ---
 
-## 9. Error UX
+## 9. Error Notifications
 
-Error biasa tampil di status bar. Error penting boleh menggunakan messagebox.
+Standard warnings appear in the status bar. Critical errors are displayed using modal alert boxes.
 
-Contoh error:
+Example messages:
 - `Invalid username or password.`
 - `Room not found.`
-- `Server S1 is down. Please try again later.`
-- `File too large. Max size is 100 MB.`
-- `Checksum mismatch. File marked as corrupted.`
-- `Invalid packet received. Connection remains active.`
+- `Server S1 is offline. Please try again later.`
+- `File size exceeds the 100 MB limit.`
+- `Checksum verification failed. File marked corrupted.`
+- `Invalid packet structure received.`
 
 Rules:
-- Jangan tampilkan raw JSON ke user biasa.
-- Error teknis detail tetap masuk log file.
-- UI harus tetap aktif setelah error.
+- Never display raw JSON packets in user-facing error dialogues.
+- Detailed technical exception traces must be written to log files.
+- The UI must remain responsive and active after errors.
 
 ---
 
 ## 10. Concurrent Web Sessions and UI Updates
 
-Browser Web UI berinteraksi secara asinkron dengan Web API server melalui fetch request. Event real-time disalurkan dari server TCP ke Web API server, kemudian diteruskan ke browser melalui mekanisme HTTP Long-polling `/api/events`.
+The browser Web UI interacts asynchronously with the Web API server via fetch requests. Real-time events are dispatched from backend TCP sockets to the Web API server, then forwarded to the browser client using an HTTP Long-polling `/api/events` mechanism.
 
-Required pattern:
+Required Javascript Polling Pattern:
 
 ```javascript
-// Web UI JavaScript Polling Loop
 async function pollEvents() {
     try {
         const response = await fetch(`/api/events?session_id=${sessionId}`);
@@ -364,17 +352,17 @@ async function pollEvents() {
     } catch (e) {
         console.error("Polling error", e);
     }
-    setTimeout(pollEvents, 500); // Poll again
+    setTimeout(pollEvents, 500);
 }
 ```
 
 Web API Threads:
-- Thread pool HTTP melayani request asinkron dari browser.
-- Thread socket penerima menerima pesan dari Gateway/Process Server secara terus-menerus dan menyimpannya ke antrean `WebSession.events`.
+- The HTTP ThreadPool serves concurrent incoming requests from the browser.
+- Background receiver threads read TCP socket streams and queue events in the thread-safe `WebSession.events`.
 
 Rules:
-- Klien web (JS) tidak boleh memblokir UI saat melakukan transfer berkas.
-- Status progres upload/download diperbarui menggunakan UI widget berbasis web (HTML progress element atau flexbox component).
+- The web client (JavaScript) must not block the UI during file transfers.
+- Upload and download progress is updated dynamically using standard web progress elements.
 
 ---
 
@@ -382,41 +370,41 @@ Rules:
 
 ```txt
 client/
-├── main.py                 # Entry point Web Server / HTTP-to-TCP launcher
-├── gateway_connection.py   # Gateway socket client
-└── room_connection.py      # Process Server socket client
+├── main.py                 # Entry point / Web Server launcher
+├── gateway_connection.py   # Gateway TCP socket handler
+└── room_connection.py      # Process Server TCP socket handler
 web_ui/
-├── index.html              # HTML layout Single Page Application
-└── app.js                  # Javascript logic (polling, upload queue, DOM updates)
+├── index.html              # Single Page Application HTML markup
+└── app.js                  # UI event handlers, upload queue, DOM updates
 web_api/
-└── server.py               # Custom HTTP Server & REST API translator
+└── server.py               # Web API HTTP translation server
 ```
 
 ---
 
-## 12. Help Dialog
+## 12. Help Guidelines Dialog
 
-Help tidak berupa `/help` command. Gunakan menu atau tombol **Help**.
+Help guidelines must be accessible through a dedicated **Help** menu or button in the Web UI.
 
-Isi help:
-- Cara login/register.
-- Cara mengirim PM.
-- Cara membuat/join room.
-- Cara chat di room.
-- Cara upload/download file.
-- Penjelasan status Gateway dan Room Server.
+Information included:
+- Instructions to register and log in.
+- Steps to send global Private Messages.
+- Steps to create and join rooms.
+- Instructions to chat inside a room.
+- Instructions to upload and download files.
+- Visual definitions of status bar symbols.
 
 ---
 
 ## 13. UX Rules
 
-1. UI utama wajib berupa Web UI di browser.
-2. Jangan gunakan CLI/TUI sebagai UI client utama.
-3. PM prefix harus berbeda dari room chat.
-4. System event harus berbeda dari user message.
-5. File transfer harus memiliki progress bar.
-6. User harus bisa menerima PM walaupun sedang berada di room.
-7. Waiting Area dan Room Area harus terlihat berbeda.
-8. Button yang memicu request network harus disabled sementara saat request berjalan bila perlu.
-9. GUI tidak boleh freeze saat upload/download atau menerima banyak pesan.
-10. Semua update UI dari thread jaringan dikirim ke browser via `/api/events` long-polling.
+1. The primary client UI must be a browser-based Web UI.
+2. Do not use CLI/TUI interfaces as the primary user client.
+3. Private message formats must be visually distinct from room chat broadcasts.
+4. System notifications must be visually distinct from user messages.
+5. File transfers must display a live progress bar.
+6. Users must be able to receive PMs while active inside a chat room.
+7. The lobby/waiting area and room chat area must be visually distinct.
+8. Buttons triggering network requests should be disabled while processing is underway.
+9. The browser GUI must never freeze during transfers or message surges.
+10. All UI updates from the background networking threads must be routed to the browser via long-polling `/api/events` requests.

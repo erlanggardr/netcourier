@@ -1,161 +1,157 @@
 # NetCourier - Program & Feature Guide
 
-Panduan ini menjelaskan seluruh fitur yang telah diimplementasikan pada aplikasi **NetCourier**, lengkap dengan tangkapan layar (screenshot) sebagai pembuktian fungsionalitas program.
+This guide describes all features implemented in the **NetCourier** application, along with screenshots as functional verification.
 
-Semua pengujian visual dilakukan menggunakan antarmuka berbasis web (**Web-based UI SPA**) yang dihubungkan ke server backend TCP socket melalui jembatan API HTTP/SSE (`web_api/server.py`).
+All visual tests were executed using the **Web-based SPA UI** connected to the TCP Socket backend through the HTTP/SSE API Bridge (`web_api/server.py`).
 
 ---
 
-## Struktur Komponen & Peran Sistem (Architecture Roles)
+## Architecture Components & Roles
 
-Aplikasi NetCourier dibagi menjadi beberapa komponen utama yang memiliki peran dan tanggung jawab spesifik dalam menangani alur web dan backend:
+The NetCourier application is divided into several main components, each having specific responsibilities:
 
 ### 1. Web Client (Frontend / Browser UI)
-*   **Peran:** Menyajikan antarmuka visual kepada pengguna dan menangani interaksi langsung (click events, form submissions, file selection, XHR slicing).
-*   **Komponen File:**
-    *   [web_ui/index.html](file:///d:/Project/netcourier/web_ui/index.html): Kerangka tampilan Single Page Application (SPA), modal chat, transfer list, dan reaction panels.
-    *   [web_ui/app.js](file:///d:/Project/netcourier/web_ui/app.js): Logika pengontrol UI (event listeners, dynamic rendering, file slicing/upload loop, polling `/api/events` menggunakan Server-Sent Events / Long-polling).
-*   **Cara Kerja:**
-    *   Berjalan di peramban web client.
-    *   Mengirim request HTTP REST ke Web API Server.
-    *   Menerima broadcast real-time (pesan baru, reaksi emoji, status mengetik) dari event stream HTTP.
+*   **Role:** Serves the visual UI to users and handles user interactions (button clicks, form submissions, file selection, and concurrent chunk slicing).
+*   **Key Files:**
+    *   [web_ui/index.html](file:///d:/Project/netcourier/web_ui/index.html): Layout structure for the SPA, modal inputs, file transfer cards, and emoji reaction overlays.
+    *   [web_ui/app.js](file:///d:/Project/netcourier/web_ui/app.js): Handles DOM updates, user actions, chunk upload loops, and polls `/api/events` for real-time events.
+*   **Flow:**
+    *   Runs locally inside the user's browser.
+    *   Communicates with the Web API server via standard REST API requests.
+    *   Subscribes to server-sent events for real-time chat, reactions, and room updates.
 
 ### 2. Web API Server (HTTP-to-TCP Bridge)
-*   **Peran:** Bertindak sebagai jembatan penerjemah yang mengubah panggilan REST API (HTTP) dari browser menjadi paket protokol TCP biner, serta meneruskan respon TCP server kembali ke browser.
-*   **Komponen File:**
-    *   [web_api/server.py](file:///d:/Project/netcourier/web_api/server.py): Server HTTP kustom berkinerja tinggi yang menangani REST routing, manajemen sesi `WebSession` yang melacak socket TCP persisten, dan pengiriman event streaming.
-    *   [client/main.py](file:///d:/Project/netcourier/client/main.py): Entry point (launcher) untuk memulai server Web API di port 8080.
-*   **Cara Kerja:**
-    *   Menerima HTTP Request -> Mencari `WebSession` aktif -> Mengambil raw socket -> Mengirim paket TCP biner terbingkai length-prefixed.
-    *   Melacak koneksi persistent Gateway (`session.gateway_conn`) dan Process Server (`session.room_conn`).
-    *   Menggunakan thread-safe `write_lock` pada socket TCP untuk mencegah korupsi data stream selama unggahan potongan biner (chunks) paralel.
+*   **Role:** Translates HTTP REST requests from the browser into custom biner TCP packets and relays TCP responses back to the browser.
+*   **Key Files:**
+    *   [web_api/server.py](file:///d:/Project/netcourier/web_api/server.py): Custom high-performance HTTP server that manages endpoints, SSE events, and `WebSession` wrappers for persistent sockets.
+    *   [client/main.py](file:///d:/Project/netcourier/client/main.py): Entry point launcher script to start the web server at port 8080.
+*   **Flow:**
+    *   Receives HTTP request -> maps `Session-Id` header to a `WebSession` -> forwards JSON/binary data to persistent Gateway and Process Server TCP sockets.
+    *   Implements socket-level thread-safe `write_lock` to prevent binary stream interleaving during parallel chunk uploads.
 
-### 3. Gateway Server (Auth & Global Directory)
-*   **Peran:** Mengkoordinasikan status sistem secara global (autentikasi, sesi aktif, perutean pesan privat/PM, pembuatan room, dan beban kerja server).
-*   **Komponen File:**
-    *   [gateway/main.py](file:///d:/Project/netcourier/gateway/main.py): Server utama yang membuka socket client-facing (port 9000) dan backend-facing (port 9001).
-    *   [gateway/auth_service.py](file:///d:/Project/netcourier/gateway/auth_service.py): Melakukan pendaftaran dan verifikasi login menggunakan enkripsi PBKDF2.
-    *   [gateway/presence_service.py](file:///d:/Project/netcourier/gateway/presence_service.py): Mencatat status user (online/offline) di database SQLite.
-    *   [gateway/load_balancer.py](file:///d:/Project/netcourier/gateway/load_balancer.py): Memilih server pemroses dengan beban paling rendah saat room dibuat.
-*   **Cara Kerja:**
-    *   Berjalan sebagai server TCP socket mandiri.
-    *   Menerima pendaftaran detak jantung (*heartbeat*) Process Server dan melacak ketersediaan mereka.
-    *   Mengatur perutean data global terpusat.
+### 3. Gateway Server (Authentication & Global Directory)
+*   **Role:** Acts as the primary orchestrator for user identity, sessions, global online lists, load balancing, and private messaging routing.
+*   **Key Files:**
+    *   [gateway/main.py](file:///d:/Project/netcourier/gateway/main.py): Gateway socket host listening on client-facing port 9000 and backend-facing port 9001.
+    *   [gateway/auth_service.py](file:///d:/Project/netcourier/gateway/auth_service.py): Registers and validates users with PBKDF2 password hashing.
+    *   [gateway/presence_service.py](file:///d:/Project/netcourier/gateway/presence_service.py): Stores current presence states in the SQLite DB.
+    *   [gateway/load_balancer.py](file:///d:/Project/netcourier/gateway/load_balancer.py): Selects the least loaded active Process Server for room mapping.
+*   **Flow:**
+    *   Monitors registered Process Servers via TCP heartbeats.
+    *   Acts as the central router for global user presence and global private messages.
 
-### 4. Process Server (Chat Room & File Transfer)
-*   **Peran:** Menangani semua fungsionalitas obrolan di dalam room chat dan proses transfer berkas (upload/download).
-*   **Komponen File:**
-    *   [server/main.py](file:///d:/Project/netcourier/server/main.py): Server room mandiri yang menangani multi-klien via threads/socket select, broadcast chat room, indikator mengetik, reaksi emoji, dan chunked upload/download.
-*   **Cara Kerja:**
-    *   Menghubungkan socket client yang sudah terautentikasi (melalui koordinasi room location dari Gateway).
-    *   Menyimpan progress upload biner (`self.transfer_progress`) di memori dan menyimpannya secara bertahap ke SQLite DB.
-    *   Menyimpan file fisik biner langsung ke folder penyimpanan lokal per-room ([storage/S1/](file:///d:/Project/netcourier/storage/S1) atau [storage/S2/](file:///d:/Project/netcourier/storage/S2)).
+### 4. Process Server (Chat Rooms & File Transfers)
+*   **Role:** Manages the actual chat room sessions and coordinates high-performance chunked file transfers (upload/download).
+*   **Key Files:**
+    *   [server/main.py](file:///d:/Project/netcourier/server/main.py): Standalone TCP process server hosting chat, reactions, typing indicator broadcasting, and chunk parsing.
+*   **Flow:**
+    *   Manages clients connected directly to assigned ports (e.g., S1 on port 9101).
+    *   Caches active file handles in `self.transfer_progress` to reduce Disk I/O overhead.
+    *   Saves uploads to [storage/S1/](file:///d:/Project/netcourier/storage/S1) or [storage/S2/](file:///d:/Project/netcourier/storage/S2).
 
 ---
 
+## 1. Authentication (Register & Login)
 
-## 1. Fitur Autentikasi (Registrasi & Login)
+NetCourier supports user registration and login with encrypted password storage on the Gateway using PBKDF2.
 
-NetCourier menyediakan mekanisme pendaftaran akun baru secara langsung dan login dengan perlindungan kata sandi menggunakan hashing aman PBKDF2 di sisi Gateway.
+### 1.1 User Registration
+Users can register an account by entering a username and password. The Gateway hashes the password using PBKDF2 before storing it in the database.
+![User Registration](docs/assets/step1_registration.png)
 
-### 1.1 Registrasi User Baru
-Ketika pengguna belum memiliki akun, mereka dapat mendaftarkan username dan password. Hashing PBKDF2 akan dilakukan di sisi Gateway sebelum disimpan di database SQLite.
-![Registrasi User](docs/assets/step1_registration.png)
+### 1.2 Login Page
+Registered users log in to initiate an active session. The login response returns a secure `session_token` used for subsequent requests.
+![Login Page UI](docs/assets/test_01_login_page.png)
 
-### 1.2 Halaman Login
-Setelah terdaftar, pengguna dapat masuk dengan kredensial mereka. Sesi login akan menghasilkan sebuah `session_token` unik yang digunakan untuk mengautentikasi setiap transaksi data selanjutnya.
-![Halaman Login](docs/assets/test_01_login_page.png)
-
-### 1.3 Login Berhasil
-Ketika kredensial valid, Gateway membalas dengan status `LOGIN_OK`, dan pengguna akan diarahkan ke Dashboard utama.
-![Login Berhasil](docs/assets/step1_login_success.png)
-
----
-
-## 2. Dashboard Utama & Presensi (Online Users)
-
-Setelah login, pengguna masuk ke dashboard utama. Di sini, pengguna dapat melihat status kehadiran pengguna lain secara real-time dan daftar room obrolan yang aktif.
-
-*   **Daftar User Online:** Menampilkan siapa saja yang sedang aktif (online) di dalam sistem dengan status dan lokasinya secara dinamis.
-*   **Daftar Room:** Menampilkan semua ruang obrolan beserta jumlah anggota aktif yang sedang bergabung.
-![Dashboard Utama](docs/assets/test_02_dashboard.png)
+### 1.3 Successful Login
+Once credentials are valid, the Gateway sends a `LOGIN_OK` packet, and the user is redirected to the dashboard.
+![Successful Login](docs/assets/step1_login_success.png)
 
 ---
 
-## 3. Obrolan Room (Room Chat & System Events)
+## 2. Dashboard & User Presence (Online List)
 
-Fitur room chat berjalan di atas **Process Server (S1/S2)**. Ketika pengguna memilih untuk bergabung ke salah satu room, Gateway akan memberikan lokasi server (IP & Port) melalui prinsip *load balancing* berbasis beban terendah, lalu koneksi TCP Socket ke room server tersebut akan didirikan.
+Upon logging in, users arrive at the main Dashboard. It displays a real-time list of online users and active chat rooms.
+*   **Online Users List:** Dynamically shows who is online, their status, and their current room location.
+*   **Room Directory:** Shows all rooms created along with active member counts.
+![Dashboard Overview](docs/assets/test_02_dashboard.png)
 
-### 3.1 Bergabung ke Room
-Berikut tampilan room setelah user berhasil masuk. Sistem menampilkan judul room di bagian atas dan memuat riwayat obrolan (*chat history*) sebelumnya dari database.
-![Bergabung ke Room](docs/assets/step2_joined_room.png)
+---
 
-### 3.2 Mengirim Pesan Chat
-Pengguna dapat mengetik pesan dan mengirimkannya. Pesan dikirim menggunakan paket `ROOM_CHAT_SEND` dan disebarkan ke semua anggota room secara real-time via `ROOM_CHAT_BROADCAST`.
-![Mengirim Pesan](docs/assets/step3_message_sent.png)
+## 3. Room Chat & System Events
+
+Chat rooms are hosted on dedicated **Process Servers (S1/S2)**. When joining a room, the Gateway routes the user to the correct server.
+
+### 3.1 Joined Room
+When entering a room, the Web UI establishes a TCP socket connection to the room server, changes the view, and fetches the chat history from the SQLite database.
+![Joined Room](docs/assets/step2_joined_room.png)
+
+### 3.2 Sending Messages
+Users send chat messages by triggering the `ROOM_CHAT_SEND` API request, which broadcasts the message to all members in real-time.
+![Sent Message](docs/assets/step3_message_sent.png)
 
 ---
 
 ## 4. Emoji Reactions & Typing Indicator
 
-Untuk meningkatkan interaktivitas room, sistem dilengkapi dengan indikator mengetik dan reaksi emoji pada pesan chat.
+Room participants can react to chat bubbles and see when others are typing.
 
-### 4.1 Indikator Mengetik (Typing Indicator)
-Ketika pengguna mulai mengetik, event `ROOM_TYPING_INDICATOR` dikirim ke server dan disebarkan ke seluruh anggota room sehingga muncul teks "[Username] is typing..." secara dinamis.
+### 4.1 Typing Indicator
+When typing, the `ROOM_TYPING_INDICATOR` event broadcasts to the room, displaying "[Username] is typing..." dynamically.
 
-### 4.2 Memilih Emoji Reaction
-Pengguna dapat mengklik ikon reaksi pada setiap pesan chat bubble untuk memilih emoji (seperti 🔥, 👍, ❤️, 😂).
-![Memilih Reaksi](docs/assets/test_05_reaction_working.png)
+### 4.2 Reacting to Messages
+Clicking the reaction icon on a chat bubble opens a reaction overlay (allowing emoticons like 🔥, 👍, ❤️, 😂).
+![Reactions UI](docs/assets/test_05_reaction_working.png)
 
-### 4.3 Tampilan Setelah Reaksi Ditambahkan
-Emoji reaksi akan muncul di bawah bubble chat yang bersangkutan dengan jumlah akumulasi klik dan daftar username pemberi reaksi secara dinamis.
-![Reaksi Berhasil](docs/assets/test_04_after_reaction.png)
-
----
-
-## 5. Reliable File Transfer (Unggah & Unduh File)
-
-Pengiriman berkas menggunakan protokol *Reliable Chunked Transfer* dengan pembagian file menjadi potongan-potongan kecil (chunks) dan validasi keutuhan file menggunakan **SHA-256 Checksum**.
-
-### 5.1 Unggah Berkas & Progress Bar
-Ketika file diunggah melalui tombol input, file akan dipecah menjadi chunks (ukuran dinamis antara 1MB s.d. 16MB berdasarkan ukuran file untuk mencegah port exhaustion). Status bar akan menampilkan persentase progress dan estimasi kecepatan unggah secara langsung.
-![Progress Upload](docs/assets/upload_progress.png)
-
-### 5.2 Unggah File Selesai
-Setelah semua chunks berhasil diterima oleh Process Server, server memverifikasi checksum SHA-256 berkas fisik dengan nilai checksum awal. Jika cocok, status berkas diubah menjadi `available` dan kartu file ditampilkan di dalam room chat.
-![Upload Selesai](docs/assets/step4_5_upload_complete.png)
-
-### 5.3 Pengujian Berkas Besar (500MB/1GB) & Kecepatan
-Mekanisme dynamic chunk size dan thread-safe write locks memungkinkan transfer berkas besar hingga **1GB** berjalan stabil dengan throughput tinggi (mencapai **113+ MB/s** di browser).
-![Upload File Besar](docs/assets/upload_progress_2.png)
-![Upload 1GB Selesai](docs/assets/upload_completed.png)
-
-### 5.4 Unduh Berkas (Streaming Chunked HTTP)
-Pengguna dapat mengunduh berkas langsung dari bubble chat. Web API Server akan meminta data berkas ke Process Server (`DOWNLOAD_REQUEST`) dan melakukan streaming data chunks tersebut kembali ke browser.
-![Download Sukses](docs/assets/step6_download_success.png)
+### 4.3 Reactions Applied
+The selected emoji appears beneath the chat bubble, aggregating click counts and listing the names of reacting users.
+![Reactions Applied](docs/assets/test_04_after_reaction.png)
 
 ---
 
-## 6. Penghapusan Berkas (File Deletion)
+## 5. Reliable File Transfer (Upload & Download)
 
-Pengguna dapat menghapus berkas yang telah mereka unggah. Ketika tombol "Delete File" diklik, request `ROOM_DELETE_FILE` dikirim ke server. Server akan menghapus berkas fisik di disk, memperbarui database, dan mengirimkan broadcast `ROOM_DELETE_FILE_BROADCAST` agar kartu file tersebut hilang secara real-time dari layar browser semua anggota room.
-![Kartu File Terhapus](docs/assets/deleted.png)
-![Status File Terhapus](docs/assets/step7_file_deleted.png)
+File transfers slice data into chunks (scaled dynamically from 1MB to 16MB to prevent port exhaustion) and verify integrity with **SHA-256 Checksums**.
+
+### 5.1 Uploading File & Progress Bar
+Selecting a file starts the parallel upload worker loop. The transfer card displays the progress bar percentage and upload speed metrics.
+![Upload Progress](docs/assets/upload_progress.png)
+
+### 5.2 Upload Complete
+Once all chunks are received, the Process Server verifies the final file checksum against the original SHA-256. If matched, the file is set as `available` and appears in the chat.
+![Upload Complete](docs/assets/step4_5_upload_complete.png)
+
+### 5.3 Large File Uploads (500MB / 1GB) & Speed
+With dynamic chunk scaling and thread-safe write locks, large files (up to **1GB**) transfer securely at speeds up to **113+ MB/s** in the browser.
+![Large File Upload](docs/assets/upload_progress_2.png)
+![1GB Upload Complete](docs/assets/upload_completed.png)
+
+### 5.4 File Downloading (HTTP Streaming)
+Users download files directly from the bubble link. The Web API streams chunks from S1 and serves it as a chunked HTTP response.
+![Download Complete](docs/assets/step6_download_success.png)
 
 ---
 
-## 7. Interaksi Multi-User & Moderasi (Kick User)
+## 6. File Deletion
 
-NetCourier mendukung interaksi banyak pengguna secara simultan di dalam room chat yang sama, lengkap dengan kendali administrasi oleh pembuat room (*room owner*).
+Users can delete files they uploaded. Clicking "Delete File" triggers `ROOM_DELETE_FILE`, deleting the file from S1 storage and updating room members.
+![File Deleted UI](docs/assets/deleted.png)
+![File Deleted Confirmation](docs/assets/step7_file_deleted.png)
 
-### 7.1 Multi-User Chatting
-Interaksi obrolan grup secara real-time antar pengguna yang berbeda di dalam room.
-![Multi-user Chat](docs/assets/test_08_multiuser_chat.png)
+---
 
-### 7.2 Kick User (Moderasi)
-Pembuat room (*room owner*) memiliki wewenang untuk mengeluarkan anggota room yang melanggar aturan. Owner dapat mengklik tombol "Kick" di samping nama anggota pada panel daftar member.
-![Melakukan Kick User](docs/assets/test_09_kick_user.png)
+## 7. Moderation (Kick User)
 
-### 7.3 Hasil Setelah User Dikick
-Pengguna yang dikick akan langsung dikeluarkan dari room obrolan secara otomatis dan dipaksa kembali ke dashboard utama dengan notifikasi sistem yang sesuai.
-![User Berhasil Dikick](docs/assets/test_10_user2_kicked.png)
+Room owners have administrative control to manage members.
+
+### 7.1 Multi-User Chat
+Multiple users can chat and share files simultaneously in the same room.
+![Multi-user Chatting](docs/assets/test_08_multiuser_chat.png)
+
+### 7.2 Kick Action
+The owner can kick any member by clicking "Kick" in the room member list panel.
+![Owner Kicking Member](docs/assets/test_09_kick_user.png)
+
+### 7.3 Kicked View
+The kicked user is immediately disconnected from the room server and redirected to the dashboard with an notification alert.
+![Kicked Redirection](docs/assets/test_10_user2_kicked.png)

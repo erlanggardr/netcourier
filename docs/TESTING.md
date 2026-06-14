@@ -1,313 +1,293 @@
 # Testing Guide - NetCourier
 
-Dokumen ini menjelaskan pengujian manual, pengujian protokol, reliability test, performance test, dan load test.
+This document outlines the testing protocols for NetCourier, covering manual functional testing, protocol validation, reliability tests, performance tests, and simulated load testing.
 
 ---
 
 ## 1. Testing Goals
 
-Pengujian harus membuktikan:
-1. fitur wajib Multi-Chat Rooms berjalan,
-2. file transfer bonus berjalan,
-3. Gateway/Auth/Load Balancer berjalan,
-4. PM global berjalan dari waiting room ke user yang sedang di room,
-5. server stabil saat banyak client,
-6. malformed packet tidak menyebabkan crash,
-7. latency dan throughput dapat diukur.
+Testing must verify and demonstrate that:
+1. Core Multi-Chat Rooms specifications function correctly.
+2. Chunked file transfers succeed, write, and verify.
+3. Gateway, authentication, and load balancing operate seamlessly.
+4. Global PMs are routed correctly from lobby to active room users.
+5. Server stability is maintained under concurrent client loads.
+6. Malformed packets do not crash the servers.
+7. Network latency and transfer throughput are measurable.
 
 ---
 
-## 2. Manual Functional Test
+## 2. Manual Functional Tests
 
-## 2.1 Authentication
+### 2.1 Authentication
 
-- [ ] User bisa register.
-- [ ] Username duplikat ditolak.
-- [ ] User bisa login.
-- [ ] Password salah ditolak.
-- [ ] Duplicate login ditangani.
-- [ ] User bisa logout.
-- [ ] Token invalid ditolak Process Server.
+- [ ] Guests can register accounts.
+- [ ] Duplicate usernames are rejected.
+- [ ] Registered users can log in.
+- [ ] Incorrect credentials/passwords are rejected.
+- [ ] Duplicate login attempts are handled (disconnects previous or rejects new session).
+- [ ] Users can successfully log out.
+- [ ] Request packets containing invalid tokens are rejected by Process Servers.
 
-Expected:
-- Gateway log mencatat register/login/logout.
-- User masuk `user_presence`.
-
----
-
-## 2.2 Waiting Room
-
-- [ ] Setelah login, user masuk waiting mode.
-- [ ] User bisa melihat Online Users table.
-- [ ] User bisa melihat Rooms table.
-- [ ] User bisa mengirim PM tanpa join room.
-- [ ] User bisa menerima PM tanpa join room.
+Expected behavior:
+- Gateway server logs record all registration, login, and logout events.
+- Active user presence statuses update in the database.
 
 ---
 
-## 2.3 Private Message
+### 2.2 Global Lobby (Waiting Room)
 
-Scenario A: waiting to waiting
-- [ ] User A dan B login.
-- [ ] User A memilih Budi pada panel Online Users, mengetik pesan PM, lalu menekan tombol Send PM.
-- [ ] User B menerima PM.
-- [ ] PM tersimpan di database.
-
-Scenario B: waiting to in-room
-- [ ] User B join room.
-- [ ] User A tetap di waiting.
-- [ ] User A memilih B pada panel Online Users, mengetik pesan PM, lalu menekan tombol Send PM.
-- [ ] User B menerima PM walaupun sedang di room.
-
-Scenario C: offline recipient
-- [ ] User B logout.
-- [ ] User A memilih B pada panel Online Users, mengetik pesan PM, lalu menekan tombol Send PM.
-- [ ] PM status `stored_offline`.
-- [ ] User B login lagi.
-- [ ] User B dapat membaca unread PM.
+- [ ] Upon logging in, users enter lobby/waiting mode.
+- [ ] Users can view the Online Users list table.
+- [ ] Users can view the Rooms directory list.
+- [ ] Users can send private messages without joining a room.
+- [ ] Users can receive private messages without joining a room.
 
 ---
 
-## 2.4 Room Management
+### 2.3 Private Message (PM) Routing
 
-- [ ] User bisa create room.
-- [ ] Gateway assign room ke S1/S2.
-- [ ] Room mapping tersimpan.
-- [ ] User lain bisa join room yang sama.
-- [ ] User dalam room yang sama diarahkan ke server yang sama.
-- [ ] User bisa leave room.
-- [ ] User tetap bisa PM setelah leave.
+*   **Scenario A: Lobby-to-Lobby PM**
+    - [ ] Users A and B log in and remain in the lobby.
+    - [ ] User A selects User B in the Online Users panel, writes a message, and clicks Send PM.
+    - [ ] User B receives the private message.
+    - [ ] PM is recorded in the database.
 
----
+*   **Scenario B: Lobby-to-Room PM**
+    - [ ] User B joins a chat room.
+    - [ ] User A remains in the lobby.
+    - [ ] User A selects User B in the Online Users panel, writes a message, and clicks Send PM.
+    - [ ] User B receives the private message inside the chat room.
 
-## 2.5 Room Chat
-
-- [ ] User dalam room bisa kirim broadcast chat.
-- [ ] Semua member room menerima pesan.
-- [ ] User di room lain tidak menerima pesan.
-- [ ] Pesan punya timestamp.
-- [ ] Chat history tampil saat join.
-- [ ] System event tampil saat join/leave.
-
----
-
-## 2.6 File Transfer
-
-Upload:
-- [ ] User bisa upload file 1 MB.
-- [ ] User bisa upload file 5 MB.
-- [ ] Chunk ACK diterima.
-- [ ] Progress upload tampil.
-- [ ] Checksum valid.
-- [ ] File muncul di `/files`.
-- [ ] System event file uploaded muncul.
-
-Download:
-- [ ] User lain bisa download file.
-- [ ] Progress download tampil.
-- [ ] Checksum hasil download valid.
-- [ ] File tersimpan di folder downloads.
-
-Resume:
-- [ ] Download diputus di tengah jalan.
-- [ ] Client reconnect.
-- [ ] Client resume transfer.
-- [ ] Transfer lanjut dari chunk terakhir.
-- [ ] Checksum akhir valid.
+*   **Scenario C: Offline PM Storing**
+    - [ ] User B logs out.
+    - [ ] User A writes and sends a PM to User B.
+    - [ ] PM delivery status is marked as `stored_offline`.
+    - [ ] User B logs back in.
+    - [ ] User B retrieves and displays the unread offline message.
 
 ---
 
-## 3. Protocol Test
+### 2.4 Room Management
 
-## 3.1 Valid Packet Test
-
-- [ ] REGISTER valid.
-- [ ] LOGIN valid.
-- [ ] PRIVATE_MESSAGE_SEND valid.
-- [ ] CREATE_ROOM valid.
-- [ ] JOIN_ROOM valid.
-- [ ] ROOM_CHAT_SEND valid.
-- [ ] UPLOAD_INIT valid.
-- [ ] UPLOAD_CHUNK valid.
-- [ ] DOWNLOAD_REQUEST valid.
-
-## 3.2 Malformed Packet Test
-
-Kirim packet:
-- [ ] JSON invalid.
-- [ ] Missing `type`.
-- [ ] Missing `payload`.
-- [ ] Token invalid.
-- [ ] Unknown message type.
-- [ ] Negative file size.
-- [ ] Invalid chunk index.
-- [ ] Payload size tidak sesuai.
-- [ ] Username kosong.
-- [ ] Room name kosong.
-
-Expected:
-- Server membalas `ERROR`.
-- Server tidak crash.
-- Error dicatat di log.
+- [ ] Users can create chat rooms.
+- [ ] The Gateway load balances and assigns the room mapping to S1 or S2.
+- [ ] Room mapping details are saved in the database.
+- [ ] Other users can view and join the created room.
+- [ ] All users joining the same room are routed to the same Process Server IP/port.
+- [ ] Users can leave rooms.
+- [ ] Users continue to receive and send PMs after leaving a room.
 
 ---
 
-## 4. Reliability Test
+### 2.5 Room Chat Broadcasting
 
-## 4.1 Client Disconnect
-
-- [ ] Client disconnect dari Gateway.
-- [ ] Presence menjadi offline.
-- [ ] Session menjadi inactive.
-- [ ] Server tetap berjalan.
-
-## 4.2 Room Disconnect
-
-- [ ] Client disconnect dari Process Server.
-- [ ] Membership inactive.
-- [ ] Transfer aktif menjadi interrupted.
-- [ ] Client bisa reconnect.
-
-## 4.3 Backend Down
-
-- [ ] Matikan S1.
-- [ ] Gateway berhenti menerima heartbeat S1.
-- [ ] Gateway mark S1 down.
-- [ ] Room baru tidak diarahkan ke S1.
-- [ ] S2 tetap bisa menerima room baru.
-
-## 4.4 Database Error Simulation
-
-- [ ] Simulasikan query gagal.
-- [ ] Server mengembalikan `ERROR INTERNAL_ERROR`.
-- [ ] Server tidak crash.
+- [ ] Room members can broadcast chat messages.
+- [ ] All active room members receive the broadcast in real-time.
+- [ ] Users in different rooms do not receive the broadcast.
+- [ ] Chat messages display correct timestamps.
+- [ ] Historical room chats are loaded upon entry.
+- [ ] System events display when users join or leave the room.
 
 ---
 
-## 5. Performance Test
+### 2.6 File Transfer
 
-## 5.1 Latency Test
+*   **Upload:**
+    - [ ] Users can upload a 1 MB file.
+    - [ ] Users can upload a 5 MB file.
+    - [ ] Chunk acknowledgments (ACKs) are received by the client.
+    - [ ] The upload progress bar updates correctly.
+    - [ ] SHA-256 integrity checksum validates successfully.
+    - [ ] The uploaded file appears in the room's file listing.
+    - [ ] A system file uploaded announcement is broadcasted.
 
-Command:
+*   **Download:**
+    - [ ] Other room members can download the uploaded file.
+    - [ ] The download progress bar updates correctly.
+    - [ ] The downloaded file's SHA-256 checksum matches the original.
+    - [ ] The downloaded file is written correctly in the local download directory.
+
+*   **Resumable Transfer:**
+    - [ ] The file transfer is intentionally interrupted mid-way.
+    - [ ] The client reconnects to the Process Server.
+    - [ ] The client issues a resume transfer request.
+    - [ ] The transfer resumes from the last successfully written chunk index.
+    - [ ] The completed file SHA-256 checksum validates successfully.
+
+---
+
+## 3. Protocol Validation Tests
+
+### 3.1 Valid Packet Formatting
+
+Verify the server accepts valid formatted requests:
+- [ ] REGISTER
+- [ ] LOGIN
+- [ ] PRIVATE_MESSAGE_SEND
+- [ ] CREATE_ROOM
+- [ ] JOIN_ROOM
+- [ ] ROOM_CHAT_SEND
+- [ ] UPLOAD_INIT
+- [ ] UPLOAD_CHUNK
+- [ ] DOWNLOAD_REQUEST
+
+### 3.2 Malformed Packet Robustness
+
+Transmit incorrect packets to verify error handling:
+- [ ] Malformed JSON syntax.
+- [ ] Missing mandatory `type` field.
+- [ ] Missing mandatory `payload` field.
+- [ ] Invalid or expired session tokens.
+- [ ] Unknown message types.
+- [ ] Negative file size values.
+- [ ] Invalid chunk index values.
+- [ ] Mismatched payload size indicators.
+- [ ] Empty username strings.
+- [ ] Empty room name strings.
+
+Expected results:
+- Server returns an `ERROR` response with appropriate error codes.
+- Server processes continue running normally without crashes or hangs.
+- Error exceptions are recorded in the audit logs.
+
+---
+
+## 4. Reliability Tests
+
+### 4.1 Client Abrupt Disconnection
+
+- [ ] Client disconnects abruptly from the Gateway.
+- [ ] Presence status updates to offline.
+- [ ] Session is marked inactive.
+- [ ] Gateway server continues running normally.
+
+### 4.2 Room Abrupt Disconnection
+
+- [ ] Client disconnects abruptly from the Process Server.
+- [ ] Room membership updates to inactive.
+- [ ] Active file transfer states are marked interrupted.
+- [ ] Client can reconnect and resume.
+
+### 4.3 Process Server Outage (Failover)
+
+- [ ] Terminate Process Server S1.
+- [ ] Gateway ceases to receive heartbeat packets from S1.
+- [ ] Gateway marks S1 status as `down` in the database.
+- [ ] New rooms are not routed to S1.
+- [ ] Process Server S2 remains fully active and receives new room allocations.
+
+### 4.4 Database Query Failures
+
+- [ ] Simulate database transaction/query failures.
+- [ ] Server returns `ERROR INTERNAL_ERROR` to the client.
+- [ ] Server processes continue running normally (no crashes).
+
+---
+
+## 5. Performance Benchmarks
+
+### 5.1 Latency Benchmarks
+
+Ping the server using:
 ```txt
 /ping
-/ping-room
 ```
-
-Measure:
-- Gateway RTT,
-- Process Server RTT.
 
 Table template:
 
-| Target | Clients | Avg Latency | Min | Max | Status |
+| Target Component | Clients | Avg Latency | Min Latency | Max Latency | Status |
 |---|---:|---:|---:|---:|---|
-| Gateway | 1 | ... ms | ... | ... | OK |
-| Gateway | 10 | ... ms | ... | ... | OK |
-| S1 | 1 | ... ms | ... | ... | OK |
-| S1 | 10 | ... ms | ... | ... | OK |
+| Gateway | 1 | ... ms | ... | ... | Pass |
+| Gateway | 10 | ... ms | ... | ... | Pass |
+| S1 Server | 1 | ... ms | ... | ... | Pass |
+| S1 Server | 10 | ... ms | ... | ... | Pass |
 
 ---
 
-## 5.2 Throughput Test
+### 5.2 Throughput Benchmarks
 
-File sizes:
-- 1 MB,
-- 5 MB,
-- 10 MB,
-- optional 50 MB.
+Transfer files of sizes: 1 MB, 5 MB, 10 MB, and 50 MB.
 
 Table template:
 
 | File Size | Upload Time | Download Time | Upload Throughput | Download Throughput | Checksum |
 |---:|---:|---:|---:|---:|---|
-| 1 MB | ... | ... | ... MB/s | ... MB/s | Valid |
-| 5 MB | ... | ... | ... MB/s | ... MB/s | Valid |
-| 10 MB | ... | ... | ... MB/s | ... MB/s | Valid |
+| 1 MB | ... s | ... s | ... MB/s | ... MB/s | Valid |
+| 5 MB | ... s | ... s | ... MB/s | ... MB/s | Valid |
+| 10 MB | ... s | ... s | ... MB/s | ... MB/s | Valid |
 
 ---
 
-## 6. Load Test
+## 6. Concurrency Load Testing
 
-Command example:
+Run the load testing script simulating concurrent users:
 
 ```bash
 python tests/load_test.py --clients 30 --rooms 5 --messages 100 --pm 50 --file-size 1048576
 ```
 
-Metrics:
-- total clients,
-- successful login,
-- failed login,
-- total room messages,
-- total PM,
-- average latency,
-- max latency,
-- file throughput,
-- error rate,
-- server CPU/memory optional.
-
 Table template:
 
-| Clients | Rooms | Messages | PM | Uploads | Avg Latency | Error Rate | Status |
+| Clients | Rooms | Messages | PMs | Uploads | Avg Latency | Error Rate | Status |
 |---:|---:|---:|---:|---:|---:|---:|---|
-| 5 | 1 | 100 | 20 | 2 | ... ms | ...% | OK |
-| 10 | 2 | 300 | 50 | 5 | ... ms | ...% | OK |
-| 30 | 5 | 1000 | 100 | 10 | ... ms | ...% | OK |
+| 5 | 1 | 100 | 20 | 2 | ... ms | ...% | Pass |
+| 10 | 2 | 300 | 50 | 5 | ... ms | ...% | Pass |
+| 30 | 5 | 1000 | 100 | 10 | ... ms | ...% | Pass |
 
 ---
 
 ## 7. Demo Checklist
 
-Saat demo, lakukan:
+During system evaluation, perform the following steps:
 
-1. Jalankan Gateway.
-2. Jalankan Process Server S1.
-3. Jalankan Process Server S2.
-4. Jalankan 3 client.
-5. Register/login.
-6. Tampilkan online user.
-7. User A PM User B.
-8. User B join room.
-9. User A dari waiting room PM User B yang sedang di room.
-10. Create room dan tunjukkan server assignment.
-11. Join room dari beberapa client.
-12. Broadcast room chat.
-13. Tampilkan chat history.
-14. Upload file dengan progress.
-15. Download file dengan checksum.
-16. Putuskan koneksi download dan resume.
-17. Tampilkan log server.
-18. Jalankan load test singkat.
-19. Jelaskan arsitektur dan protokol.
-
----
-
-## 8. Acceptance Criteria Global
-
-- [ ] Semua fitur wajib multi-chat room berjalan.
-- [ ] PM global berjalan dari waiting ke in-room.
-- [ ] Room affinity berjalan.
-- [ ] File transfer chunking berjalan.
-- [ ] Checksum valid.
-- [ ] Resume transfer berhasil.
-- [ ] Gateway heartbeat backend berjalan.
-- [ ] Load balancing bisa didemokan.
-- [ ] Malformed packet aman.
-- [ ] Load test menghasilkan data laporan.
+1. Start the Gateway.
+2. Start Process Server S1.
+3. Start Process Server S2.
+4. Launch 3 separate client instances.
+5. Register and log in.
+6. Display the online users list.
+7. Send a PM from User A to User B.
+8. Have User B join a room.
+9. Send a PM from User A (lobby) to User B (inside room).
+10. Create a room and demonstrate load balancing assignment.
+11. Have multiple clients join the same room.
+12. Broadcast chat messages.
+13. Display chat history logs.
+14. Upload a file and verify the progress bar updates.
+15. Download the file and verify the SHA-256 checksum.
+16. Disconnect the download midway, reconnect, and resume.
+17. View server logs.
+18. Run the concurrency load testing script.
+19. Present architecture and protocols.
 
 ---
 
-## Web UI Test
+## 8. Global Acceptance Criteria
 
-- [ ] Aplikasi client dapat dijalankan dengan `python client/main.py` dan diakses di browser.
-- [ ] Login/register dapat dilakukan melalui form di halaman web.
-- [ ] Waiting Room menampilkan online user list, room list, PM panel, dan status bar.
-- [ ] User dapat membuat room melalui form Create Room.
-- [ ] User dapat join room melalui tombol Join Room.
-- [ ] Room area menampilkan chat history, room members, file list, dan transfer panel.
-- [ ] PM tetap masuk saat user sedang berada di room (via `/api/events`).
-- [ ] Upload file dapat diproses menggunakan web file selector.
-- [ ] Progress upload/download tampil menggunakan progress bar berbasis web.
-- [ ] GUI browser tidak freeze saat load test ringan, upload/download, atau menerima banyak pesan.
-- [ ] Komunikasi asinkronus ke server web berjalan tanpa race conditions.
+- [ ] All core multi-chat room features function correctly.
+- [ ] Global PM routing functions from lobby to room.
+- [ ] Room affinity enforces server assignments.
+- [ ] File transfers segment data via chunking.
+- [ ] Cryptographic checksums are verified successfully.
+- [ ] Resumable transfer handshakes succeed.
+- [ ] Gateway heartbeat monitoring functions correctly.
+- [ ] Load balancing distributes rooms correctly.
+- [ ] Malformed packets do not crash server processes.
+- [ ] Concurrency load tests output performance reports.
+
+---
+
+## 9. Web UI Tests
+
+- [ ] Client application starts via `python client/main.py` and opens in the browser.
+- [ ] Login and registration succeed through the Web UI forms.
+- [ ] Lobby displays online user lists, room list, PM panels, and the status bar.
+- [ ] Users can create chat rooms via the web form.
+- [ ] Users can join rooms using the UI buttons.
+- [ ] Room view displays chat logs, participant lists, files, and transfer panels.
+- [ ] PM notifications are received inside room views (via `/api/events`).
+- [ ] Files can be selected and uploaded using browser file dialogues.
+- [ ] Upload/download progress indicators update dynamically.
+- [ ] Browser GUI does not freeze during transfers or message surges.
+- [ ] Asynchronous API bridge queries run without race conditions.
