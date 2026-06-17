@@ -57,15 +57,15 @@ NetCourier supports user registration and login with encrypted password storage 
 
 ### 1.1 User Registration
 Users can register an account by entering a username and password. The Gateway hashes the password using PBKDF2 before storing it in the database.
-![User Registration](docs/assets/step1_registration.png)
+![User Registration](assets/step1_registration.png)
 
 ### 1.2 Login Page
 Registered users log in to initiate an active session. The login response returns a secure `session_token` used for subsequent requests.
-![Login Page UI](docs/assets/test_01_login_page.png)
+![Login Page UI](assets/test_01_login_page.png)
 
 ### 1.3 Successful Login
 Once credentials are valid, the Gateway sends a `LOGIN_OK` packet, and the user is redirected to the dashboard.
-![Successful Login](docs/assets/step1_login_success.png)
+![Successful Login](assets/step1_login_success.png)
 
 ---
 
@@ -74,7 +74,7 @@ Once credentials are valid, the Gateway sends a `LOGIN_OK` packet, and the user 
 Upon logging in, users arrive at the main Dashboard. It displays a real-time list of online users and active chat rooms.
 *   **Online Users List:** Dynamically shows who is online, their status, and their current room location.
 *   **Room Directory:** Shows all rooms created along with active member counts.
-![Dashboard Overview](docs/assets/test_02_dashboard.png)
+![Dashboard Overview](assets/test_02_dashboard.png)
 
 ---
 
@@ -84,11 +84,11 @@ Chat rooms are hosted on dedicated **Process Servers (S1/S2)**. When joining a r
 
 ### 3.1 Joined Room
 When entering a room, the Web UI establishes a TCP socket connection to the room server, changes the view, and fetches the chat history from the SQLite database.
-![Joined Room](docs/assets/step2_joined_room.png)
+![Joined Room](assets/step2_joined_room.png)
 
 ### 3.2 Sending Messages
 Users send chat messages by triggering the `ROOM_CHAT_SEND` API request, which broadcasts the message to all members in real-time.
-![Sent Message](docs/assets/step3_message_sent.png)
+![Sent Message](assets/step3_message_sent.png)
 
 ---
 
@@ -101,11 +101,11 @@ When typing, the `ROOM_TYPING_INDICATOR` event broadcasts to the room, displayin
 
 ### 4.2 Reacting to Messages
 Clicking the reaction icon on a chat bubble opens a reaction overlay (allowing emoticons like 🔥, 👍, ❤️, 😂).
-![Reactions UI](docs/assets/test_05_reaction_working.png)
+![Reactions UI](assets/test_05_reaction_working.png)
 
 ### 4.3 Reactions Applied
 The selected emoji appears beneath the chat bubble, aggregating click counts and listing the names of reacting users.
-![Reactions Applied](docs/assets/test_04_after_reaction.png)
+![Reactions Applied](assets/test_04_after_reaction.png)
 
 ---
 
@@ -115,28 +115,28 @@ File transfers slice data into chunks (scaled dynamically from 1MB to 16MB to pr
 
 ### 5.1 Uploading File & Progress Bar
 Selecting a file starts the parallel upload worker loop. The transfer card displays the progress bar percentage and upload speed metrics.
-![Upload Progress](docs/assets/upload_progress.png)
+![Upload Progress](assets/upload_progress.png)
 
 ### 5.2 Upload Complete
 Once all chunks are received, the Process Server verifies the final file checksum against the original SHA-256. If matched, the file is set as `available` and appears in the chat.
-![Upload Complete](docs/assets/step4_5_upload_complete.png)
+![Upload Complete](assets/step4_5_upload_complete.png)
 
 ### 5.3 Large File Uploads (500MB / 1GB) & Speed
 With dynamic chunk scaling and thread-safe write locks, large files (up to **1GB**) transfer securely at speeds up to **113+ MB/s** in the browser.
-![Large File Upload](docs/assets/upload_progress_2.png)
-![1GB Upload Complete](docs/assets/upload_completed.png)
+![Large File Upload](assets/upload_progress_2.png)
+![1GB Upload Complete](assets/upload_completed.png)
 
 ### 5.4 File Downloading (HTTP Streaming)
 Users download files directly from the bubble link. The Web API streams chunks from S1 and serves it as a chunked HTTP response.
-![Download Complete](docs/assets/step6_download_success.png)
+![Download Complete](assets/step6_download_success.png)
 
 ---
 
 ## 6. File Deletion
 
 Users can delete files they uploaded. Clicking "Delete File" triggers `ROOM_DELETE_FILE`, deleting the file from S1 storage and updating room members.
-![File Deleted UI](docs/assets/deleted.png)
-![File Deleted Confirmation](docs/assets/step7_file_deleted.png)
+![File Deleted UI](assets/deleted.png)
+![File Deleted Confirmation](assets/step7_file_deleted.png)
 
 ---
 
@@ -146,12 +146,12 @@ Room owners have administrative control to manage members.
 
 ### 7.1 Multi-User Chat
 Multiple users can chat and share files simultaneously in the same room.
-![Multi-user Chatting](docs/assets/test_08_multiuser_chat.png)
+![Multi-user Chatting](assets/test_08_multiuser_chat.png)
 
 ### 7.2 Kick Action
 The owner can kick any member by clicking "Kick" in the room member list panel.
-![Owner Kicking Member](docs/assets/test_09_kick_user.png)
+![Owner Kicking Member](assets/test_09_kick_user.png)
 
 ### 7.3 Kicked View
 The kicked user is immediately disconnected from the room server and redirected to the dashboard with an notification alert.
-![Kicked Redirection](docs/assets/test_10_user2_kicked.png)
+![Kicked Redirection](assets/test_10_user2_kicked.png)
