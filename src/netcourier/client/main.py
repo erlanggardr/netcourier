@@ -1,7 +1,8 @@
 import argparse
 import sys
 import logging
-from web_api.server import WebServer
+from netcourier.web.api.http_server import HttpServer
+from netcourier.web.api.routes import APIHandler
 from netcourier.common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
 
 def main():
@@ -28,11 +29,15 @@ def main():
     logging.info(f"Starting Web Client Server on http://{args.host}:{args.port}...")
     logging.info(f"Targeting Gateway at {args.gateway_host}:{args.gateway_port}")
     
-    server = WebServer(
-        host=args.host,
-        port=args.port,
+    api_handler = APIHandler(
         gateway_host=args.gateway_host,
         gateway_port=args.gateway_port
+    )
+    
+    server = HttpServer(
+        host=args.host,
+        port=args.port,
+        api_handler=api_handler.handle_request
     )
     
     try:

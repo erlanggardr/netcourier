@@ -2,7 +2,7 @@ services:
   gateway:
     build: .
     container_name: netcourier-gateway
-    command: python -m gateway.main --host 0.0.0.0 --client-port 9000 --backend-port 9001 --debug
+    command: python -m netcourier.gateway.main --host 0.0.0.0 --client-port 9000 --backend-port 9001 --debug
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -14,7 +14,7 @@ services:
   server-s1:
     build: .
     container_name: netcourier-s1
-    command: python -m server.main --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host gateway --gateway-port 9001 --advertise-host server-s1 --debug
+    command: python -m netcourier.server.main --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host gateway --gateway-port 9001 --advertise-host server-s1 --debug
     ports:
       - "9101:9101"
     volumes:
@@ -28,7 +28,7 @@ services:
   server-s2:
     build: .
     container_name: netcourier-s2
-    command: python -m server.main --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host gateway --gateway-port 9001 --advertise-host server-s2 --debug
+    command: python -m netcourier.server.main --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host gateway --gateway-port 9001 --advertise-host server-s2 --debug
     ports:
       - "9102:9102"
     volumes:
@@ -42,7 +42,7 @@ services:
   web-client:
     build: .
     container_name: netcourier-web
-    command: python -m client.main --host 0.0.0.0 --port 8080 --gateway-host gateway --gateway-port 9000 --debug
+    command: python -m netcourier.client.main --host 0.0.0.0 --port 8080 --gateway-host gateway --gateway-port 9000 --debug
     ports:
       - "8080:8080"
     volumes:
