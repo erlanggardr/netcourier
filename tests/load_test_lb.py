@@ -149,6 +149,13 @@ def run_lb_test(num_clients):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test NetCourier Load Balancer Distribution")
     parser.add_argument("--clients", type=int, default=50, help="Number of concurrent clients to simulate")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Gateway Host IP")
+    parser.add_argument("--port", type=int, default=9000, help="Gateway Client Port")
     args = parser.parse_args()
-    
+
+    # Update global variables so TestClient uses them
+    global DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
+    DEFAULT_GATEWAY_HOST = args.host
+    DEFAULT_GATEWAY_CLIENT_PORT = args.port
+
     run_lb_test(args.clients)
