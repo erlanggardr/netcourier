@@ -30,7 +30,7 @@ flowchart TD
 
 ### 1.1 Architecture Components
 1.  **Web Client (Frontend / Browser UI):** A Single Page Application (SPA) designed using vanilla HTML/CSS/JavaScript. It handles user inputs, renders dynamic rooms, handles file slicing, monitors progress, and streams events.
-2.  **Web API Server (HTTP Bridge - `web_api/server.py`):** Translates REST requests from the browser into custom binary TCP packets. It manages persistent `WebSession` instances containing raw Gateway and Process Server sockets and forwards events using long-polling `/api/events`.
+2.  **Web API Server (HTTP Bridge - `src/netcourier/web/api/main.py`):** Translates REST requests from the browser into custom binary TCP packets. It manages persistent `WebSession` instances containing raw Gateway and Process Server sockets and forwards events using long-polling `/api/events`.
 3.  **Gateway Server (`gateway/main.py`):** Manages user registrations, PBKDF2 authentication, active session tokens, presence lists, room directories, private message (PM) routing, and heartbeat signals from Process Servers.
 4.  **Process Server (`server/main.py`):** Handles room chat broadcasting, emoji reactions, typing indicators, and file chunk operations. Files are written dynamically at specific offsets (`seek(offset)`) and cached inside local storage directories (`storage/S1` or `storage/S2`).
 5.  **Central Database (SQLite):** Acts as the unified datastore for user profiles, room listings, mapping coordinates, message history, reactions, and file transfer progress metrics.
@@ -220,7 +220,7 @@ Measured on local host network pipelines using optimized raw TCP and Web HTTP so
 
 | Technical Challenge | Root Cause | Implemented Solution |
 | :--- | :--- | :--- |
-| **Browser TCP Support** | Web browsers do not support raw TCP socket connections. | Built an HTTP-to-TCP API Bridge (`web_api/server.py`) using lightweight HTTP endpoints and SSE events. |
+| **Browser TCP Support** | Web browsers do not support raw TCP socket connections. | Built an HTTP-to-TCP API Bridge (`src/netcourier/web/api/main.py`) using lightweight HTTP endpoints and SSE events. |
 | **OOM on Large Downloads** | Reading full large files (>500MB) into memory blocks causes OOM crashes. | Configured HTTP response streaming with `Transfer-Encoding: chunked` headers to flush memory immediately. |
 | **CPU Upload Bottlenecks** | Parsing large binary payloads as UTF-8 overhead consumes excessive CPU. | Bypassed UTF-8 decoding and JSON parsing for `/api/rooms/files/upload?action=chunk` request bodies. |
 | **Localhost TCP Delay** | Nagle's algorithm blocks small segment packets (TCP ACK delayed by 40ms). | Enabled `TCP_NODELAY` socket option across all socket objects. |
@@ -234,23 +234,23 @@ Execute the following commands in separate terminal screens from the project's r
 
 ### Terminal 1: Gateway Server
 ```bash
-python -m gateway.main
+PYTHONPATH=src python -m netcourier.gateway.main
 ```
 
 ### Terminal 2: Process Server S1
 
 ```bash
-python -m server.main --server-id S1 --port 9101
+PYTHONPATH=src python -m netcourier.server.main --server-id S1 --port 9101
 ```
 
 ### Terminal 3: Process Server S2 (Optional)
 ```bash
-python -m server.main --server-id S2 --port 9102
+PYTHONPATH=src python -m netcourier.server.main --server-id S2 --port 9102
 ```
 
 ### Terminal 4: Web Client & API Bridge
 ```bash
-python -m client.main
+PYTHONPATH=src python -m netcourier.client.main
 ```
 Open your web browser and navigate to **http://localhost:8080** to access the UI.
 

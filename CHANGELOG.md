@@ -18,7 +18,7 @@ All notable changes to this project will be documented in this file.
 ## [1.0.0] - 2026-06-14
 
 ### Added
-- **Web-based UI (HTML/CSS/JS SPA)**: Replaced the legacy Tkinter GUI with a modern, responsive Single Page Application Web UI, served through an HTTP/SSE Web API Bridge (`web_api/server.py`).
+- **Web-based UI (HTML/CSS/JS SPA)**: Replaced the legacy Tkinter GUI with a modern, responsive Single Page Application Web UI, served through an HTTP/SSE Web API Bridge (`src/netcourier/web/api/main.py`).
 - **Emoji Reactions**: Enabled real-time emoji reactions (add/remove) on messages in chat rooms.
 - **Admin Kick & File Deletion**: Granted room owners the administrative power to kick members and delete uploaded files.
 - **ROOM_DELETE_FILE_BROADCAST**: Implemented dynamic broadcasting of file deletion events to instantly remove file cards from the DOM of all active room members.

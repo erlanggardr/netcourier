@@ -2,7 +2,7 @@
 
 This guide describes all features implemented in the **NetCourier** application, along with screenshots as functional verification.
 
-All visual tests were executed using the **Web-based SPA UI** connected to the TCP Socket backend through the HTTP/SSE API Bridge (`web_api/server.py`).
+All visual tests were executed using the **Web-based SPA UI** connected to the TCP Socket backend through the HTTP/SSE API Bridge (`src/netcourier/web/api/main.py`).
 
 ---
 
@@ -23,7 +23,7 @@ The NetCourier application is divided into several main components, each having 
 ### 2. Web API Server (HTTP-to-TCP Bridge)
 *   **Role:** Translates HTTP REST requests from the browser into custom biner TCP packets and relays TCP responses back to the browser.
 *   **Key Files:**
-    *   [web_api/server.py](web_api/server.py): Custom high-performance HTTP server that manages endpoints, SSE events, and `WebSession` wrappers for persistent sockets.
+    *   [src/netcourier/web/api/main.py](src/netcourier/web/api/main.py): Custom high-performance HTTP server that manages endpoints, SSE events, and `WebSession` wrappers for persistent sockets.
     *   [client/main.py](client/main.py): Entry point launcher script to start the web server at port 8080.
 *   **Flow:**
     *   Receives HTTP request -> maps `Session-Id` header to a `WebSession` -> forwards JSON/binary data to persistent Gateway and Process Server TCP sockets.

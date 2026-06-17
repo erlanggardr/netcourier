@@ -32,7 +32,7 @@ Gunakan checklist ini sebagai roadmap implementasi.
 ## Phase 2A - Web Client UI & HTTP-to-TCP Bridge
 
 - [x] Buat `client/main.py` sebagai entry point server Web UI & API.
-- [x] Buat `web_api/server.py` untuk mengelola REST API dan session bridge.
+- [x] Buat `src/netcourier/web/api/main.py` untuk mengelola REST API dan session bridge.
 - [x] Buat antarmuka Login/Register menggunakan HTML/CSS/JS.
 - [x] Buat antarmuka Waiting Room dan Room Chat di browser.
 - [x] Implementasi event queue & long-polling `/api/events` untuk real-time update.

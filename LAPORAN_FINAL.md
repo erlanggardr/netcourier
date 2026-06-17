@@ -82,7 +82,7 @@ flowchart TD
 
 #### A. Web Client & API Bridge
 NetCourier menghindari GUI desktop murni demi fleksibilitas, menggunakan antarmuka *Single Page Application* (SPA) berbasis HTML, CSS, dan JavaScript (*Vanilla*).
-- **Web API Bridge (`web_api/server.py`):** Bertindak sebagai *middleware* yang menerjemahkan permintaan HTTP (REST API dan *Long-Polling* `/api/events`) dari browser menjadi paket TCP kustom. Mengelola `WebSession` yang berisi soket mentah yang persisten ke Gateway dan Process Server.
+- **Web API Bridge (`src/netcourier/web/api/main.py`):** Bertindak sebagai *middleware* yang menerjemahkan permintaan HTTP (REST API dan *Long-Polling* `/api/events`) dari browser menjadi paket TCP kustom. Mengelola `WebSession` yang berisi soket mentah yang persisten ke Gateway dan Process Server.
 
 #### B. Gateway Server (`gateway/main.py`)
 Gateway adalah titik masuk utama (*Control Plane*) bagi semua klien.
