@@ -136,10 +136,20 @@ class UploadQueue {
 
     async calculateFileSHA256(file) {
         const arrayBuffer = await file.arrayBuffer();
-        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        return hashHex;
+        
+        if (window.crypto && window.crypto.subtle) {
+            const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        } else if (window.CryptoJS) {
+            // Fallback for insecure HTTP connections (like direct IP access)
+            const wordArray = CryptoJS.lib.WordArray.create(arrayBuffer);
+            const hash = CryptoJS.SHA256(wordArray);
+            return hash.toString(CryptoJS.enc.Hex);
+        } else {
+            throw new Error("Cannot calculate file hash: Web Crypto API is unavailable (insecure connection) and fallback library failed to load.");
+        }
     }
 
     async uploadFile(item) {
