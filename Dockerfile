@@ -23,4 +23,4 @@ COPY run.py ./
 EXPOSE 8080 9000 9001 9101 9102
 
 # Default command (usually overridden in docker-compose)
-CMD ["python", "-m", "gateway.main"]
+CMD ["python", "-m", "netcourier.gateway.main"]

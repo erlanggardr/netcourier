@@ -68,7 +68,7 @@ def test_token_expiry():
         username = f"user_{int(time.time())}"
         
         # First register
-        from common.protocol import build_packet, receive_packet, send_packet
+        from netcourier.common.protocol import build_packet, receive_packet, send_packet
         reg_pkt = build_packet("REGISTER", {
             "username": username,
             "password": "password123",

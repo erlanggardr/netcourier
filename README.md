@@ -12,7 +12,7 @@ NetCourier divides network communication into global administration tasks (coord
 
 ```mermaid
 flowchart TD
-    Browser[Web Browser Client] <-->|HTTP REST & Long-polling| Bridge[Web API Bridge / client/main.py]
+    Browser[Web Browser Client] <-->|HTTP REST & Long-polling| Bridge[Web API Bridge / src/netcourier/web/api/main.py]
     Bridge <-->|TCP Socket A: Auth, PM, Room Directory| G[Gateway / Auth / Load Balancer]
     Bridge <-->|TCP Socket B: Room Chat, File Transfer| S1[Process Server S1]
     Bridge <-->|TCP Socket B: Room Chat, File Transfer| S2[Process Server S2]
@@ -31,8 +31,8 @@ flowchart TD
 ### 1.1 Architecture Components
 1.  **Web Client (Frontend / Browser UI):** A Single Page Application (SPA) designed using vanilla HTML/CSS/JavaScript. It handles user inputs, renders dynamic rooms, handles file slicing, monitors progress, and streams events.
 2.  **Web API Server (HTTP Bridge - `src/netcourier/web/api/main.py`):** Translates REST requests from the browser into custom binary TCP packets. It manages persistent `WebSession` instances containing raw Gateway and Process Server sockets and forwards events using long-polling `/api/events`.
-3.  **Gateway Server (`gateway/main.py`):** Manages user registrations, PBKDF2 authentication, active session tokens, presence lists, room directories, private message (PM) routing, and heartbeat signals from Process Servers.
-4.  **Process Server (`server/main.py`):** Handles room chat broadcasting, emoji reactions, typing indicators, and file chunk operations. Files are written dynamically at specific offsets (`seek(offset)`) and cached inside local storage directories (`storage/S1` or `storage/S2`).
+3.  **Gateway Server (`src/netcourier/gateway/main.py`):** Manages user registrations, PBKDF2 authentication, active session tokens, presence lists, room directories, private message (PM) routing, and heartbeat signals from Process Servers.
+4.  **Process Server (`src/netcourier/server/main.py`):** Handles room chat broadcasting, emoji reactions, typing indicators, and file chunk operations. Files are written dynamically at specific offsets (`seek(offset)`) and cached inside local storage directories (`storage/S1` or `storage/S2`).
 5.  **Central Database (SQLite):** Acts as the unified datastore for user profiles, room listings, mapping coordinates, message history, reactions, and file transfer progress metrics.
 
 ---
@@ -230,29 +230,44 @@ Measured on local host network pipelines using optimized raw TCP and Web HTTP so
 
 ## 6. How to Run NetCourier
 
-Execute the following commands in separate terminal screens from the project's root folder:
+You can run the entire suite of NetCourier services concurrently using the root-level runner script, or launch individual components manually.
 
-### Terminal 1: Gateway Server
+### Option A: Running All Services Concurrently (Recommended)
+You can start the Gateway, Server S1, Server S2, and Web API/UI server together with a single command:
+```bash
+python run.py
+```
+*Press `Ctrl+C` in the terminal to gracefully stop all services.*
+
+### Option B: Running Components Manually
+If you want to run components in separate terminal windows, ensure you set the `PYTHONPATH=src` environment variable.
+
+#### Terminal 1: Gateway Server
 ```bash
 PYTHONPATH=src python -m netcourier.gateway.main
 ```
 
-### Terminal 2: Process Server S1
-
+#### Terminal 2: Process Server S1
 ```bash
 PYTHONPATH=src python -m netcourier.server.main --server-id S1 --port 9101
 ```
 
-### Terminal 3: Process Server S2 (Optional)
+#### Terminal 3: Process Server S2 (Optional)
 ```bash
 PYTHONPATH=src python -m netcourier.server.main --server-id S2 --port 9102
 ```
 
-### Terminal 4: Web Client & API Bridge
+#### Terminal 4: Web API & UI Bridge
+```bash
+PYTHONPATH=src python -m netcourier.web.api.main
+```
+*Open your web browser and navigate to **http://localhost:8080** to access the UI.*
+
+#### Terminal 5: CLI Client (Optional)
+If you prefer a command-line interface instead of the Web browser:
 ```bash
 PYTHONPATH=src python -m netcourier.client.main
 ```
-Open your web browser and navigate to **http://localhost:8080** to access the UI.
 
 ---
 
@@ -260,4 +275,4 @@ Open your web browser and navigate to **http://localhost:8080** to access the UI
 
 To view detailed explanations of all UI features along with step-by-step screenshots (Authentication, Dashboard, Reactions, File Uploads, Speed Benchmarks, and Owner Moderation), check out the guide:
 
-👉 **[PROGRAM_GUIDE.md](PROGRAM_GUIDE.md)**
+👉 **[docs/PROGRAM_GUIDE.md](docs/PROGRAM_GUIDE.md)**

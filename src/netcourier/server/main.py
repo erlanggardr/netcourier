@@ -857,7 +857,7 @@ class ProcessServer:
                 
                 import os
                 import hashlib
-                from common.constants import PROJECT_ROOT
+                from netcourier.common.constants import PROJECT_ROOT
                 import uuid
                 storage_dir = os.path.join(PROJECT_ROOT, "storage", self.server_id, str(room_id))
                 os.makedirs(storage_dir, exist_ok=True)
