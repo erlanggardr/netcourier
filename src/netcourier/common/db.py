@@ -40,7 +40,7 @@ def initialize_db():
     if db_path.exists():
         return
         
-    migration_path = PROJECT_ROOT / "migrations" / "001_init.sql"
+    migration_path = Path(__file__).resolve().parents[1] / "migrations" / "001_init.sql"
     if not migration_path.exists():
         raise FileNotFoundError(f"Migration file not found: {migration_path}")
         
