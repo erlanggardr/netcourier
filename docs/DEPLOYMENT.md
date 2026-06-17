@@ -62,25 +62,25 @@ Suitable for:
 ### Terminal 1 (Gateway):
 
 ```bash
-python gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
+PYTHONPATH=src python -m netcourier.gateway.main --host 0.0.0.0 --client-port 9000 --backend-port 9001
 ```
 
 ### Terminal 2 (Process Server S1):
 
 ```bash
-python server/server.py --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
+PYTHONPATH=src python -m netcourier.server.main --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
 ```
 
 ### Terminal 3 (Process Server S2):
 
 ```bash
-python server/server.py --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
+PYTHONPATH=src python -m netcourier.server.main --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
 ```
 
 ### Terminal 4 (Client UI / Web Bridge API):
 
 ```bash
-python client/client.py --gateway-host 127.0.0.1 --gateway-port 9000
+PYTHONPATH=src python -m netcourier.client.main --gateway-host 127.0.0.1 --gateway-port 9000
 ```
 
 ---
@@ -102,7 +102,7 @@ python client/client.py --gateway-host 127.0.0.1 --gateway-port 9000
 2. Clients connect to the server's LAN IP address:
 
    ```bash
-   python client/client.py --gateway-host 192.168.1.10 --gateway-port 9000
+   PYTHONPATH=src python -m netcourier.client.main --gateway-host 192.168.1.10 --gateway-port 9000
    ```
 
 3. Ensure the firewall allows traffic on the following TCP ports:
@@ -135,25 +135,25 @@ python client/client.py --gateway-host 127.0.0.1 --gateway-port 9000
    ```bash
    # Session for Gateway
    tmux new -s gateway
-   python3 gateway/main.py --host 0.0.0.0 --client-port 9000 --backend-port 9001
+   PYTHONPATH=src python3 -m netcourier.gateway.main --host 0.0.0.0 --client-port 9000 --backend-port 9001
    ```
 
    ```bash
    # Session for S1
    tmux new -s s1
-   python3 server/server.py --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
+   PYTHONPATH=src python3 -m netcourier.server.main --server-id S1 --host 0.0.0.0 --port 9101 --gateway-host 127.0.0.1 --gateway-port 9001
    ```
 
    ```bash
    # Session for S2
    tmux new -s s2
-   python3 server/server.py --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
+   PYTHONPATH=src python3 -m netcourier.server.main --server-id S2 --host 0.0.0.0 --port 9102 --gateway-host 127.0.0.1 --gateway-port 9001
    ```
 
 4. Clients connect using the public IP of the VPS:
 
    ```bash
-   python3 client/client.py --gateway-host <VPS_PUBLIC_IP> --gateway-port 9000
+   PYTHONPATH=src python3 -m netcourier.client.main --gateway-host <VPS_PUBLIC_IP> --gateway-port 9000
    ```
 
 ---

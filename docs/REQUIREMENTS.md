@@ -369,7 +369,7 @@ A benchmarking utility script is provided to simulate: concurrent client logins,
 
 ### 5.4 Maintainability
 - Modular codebase structure.
-- Common protocols shared in `common/` modules.
+- Common protocols shared in `src/netcourier/common/` modules.
 - Dedicated handler functions per message type.
 - Consistent log formats.
 - Documentation updated alongside design changes.

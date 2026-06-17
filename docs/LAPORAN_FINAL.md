@@ -62,7 +62,7 @@ Untuk menghindari *single point of failure* dan kemacetan jaringan (*bottleneck*
 
 ```mermaid
 flowchart TD
-    Browser[Web Browser Client] <-->|HTTP REST & Long-polling| Bridge[Web API Bridge / client/main.py]
+    Browser[Web Browser Client] <-->|HTTP REST & Long-polling| Bridge[Web API Bridge / src/netcourier/web/api/main.py]
     Bridge <-->|TCP Socket A: Auth, PM, Room Directory| G[Gateway / Auth / Load Balancer]
     Bridge <-->|TCP Socket B: Room Chat, File Transfer| S1[Process Server S1]
     Bridge <-->|TCP Socket B: Room Chat, File Transfer| S2[Process Server S2]
@@ -84,14 +84,14 @@ flowchart TD
 NetCourier menghindari GUI desktop murni demi fleksibilitas, menggunakan antarmuka *Single Page Application* (SPA) berbasis HTML, CSS, dan JavaScript (*Vanilla*).
 - **Web API Bridge (`src/netcourier/web/api/main.py`):** Bertindak sebagai *middleware* yang menerjemahkan permintaan HTTP (REST API dan *Long-Polling* `/api/events`) dari browser menjadi paket TCP kustom. Mengelola `WebSession` yang berisi soket mentah yang persisten ke Gateway dan Process Server.
 
-#### B. Gateway Server (`gateway/main.py`)
+#### B. Gateway Server (`src/netcourier/gateway/main.py`)
 Gateway adalah titik masuk utama (*Control Plane*) bagi semua klien.
 - **Autentikasi & Sesi:** Memvalidasi kredensial pengguna dan mengelola *session token*.
 - **Global Presence & Routing:** Mengelola daftar pengguna daring dan me-rutekan pesan privat lintas-server.
 - **Load Balancing:** Saat pengguna membuat *room* baru, Gateway menghitung beban tiap Process Server (berdasarkan koneksi dan transfer aktif). Gateway menggunakan algoritma nilai (*score-based*) untuk memilih server yang paling lengang.
 - **Room Affinity:** Gateway menjamin semua pengguna yang masuk ke *room* tertentu selalu dialokasikan ke Process Server yang sama (di mana riwayat dan berkas room tersebut disimpan).
 
-#### C. Process Server / Data Node (`server/main.py`)
+#### C. Process Server / Data Node (`src/netcourier/server/main.py`)
 Merupakan simpul pekerja di *Data Plane* yang menangani koneksi intensif (S1, S2, dst.).
 - **Komunikasi Internal Room:** Menerima koneksi dari klien, memproses *broadcast chat*, dan riwayat percakapan.
 - **File Transfer Engine:** Melayani operasi I/O berat. Setiap Process Server memiliki penyimpanan fisiknya masing-masing (misal: `storage/S1`).
@@ -163,7 +163,7 @@ Selama siklus pengembangan, ditemukan dan diselesaikan beberapa kendala teknis t
 
 4. **Kegagalan Memuat Riwayat Obrolan (Header Exceeds Limit)**
    - *Masalah:* Riwayat pesan ruangan yang sangat panjang menghasilkan JSON Header yang melewati batas toleransi awal protokol (64KB).
-   - *Solusi:* Mengubah konstanta `MAX_HEADER_SIZE` menjadi 1MB di `common/protocol.py`.
+   - *Solusi:* Mengubah konstanta `MAX_HEADER_SIZE` menjadi 1MB di `src/netcourier/common/protocol.py`.
 
 5. **Ketidaksinkronan Daftar Pengguna (Ghost Online Session)**
    - *Masalah:* Pengguna yang menutup *tab* atau sekadar *logout* lokal tetap tercatat daring hingga di-timeout oleh *Garbage Collector* Gateway (5 menit).

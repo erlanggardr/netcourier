@@ -96,10 +96,10 @@ Upon logging in, the user enters the global lobby/waiting room coordinated by th
 Authenticated user and Guest.
 
 ### Description
-NetCourier utilizes a Single Page Application (SPA) Web UI built on vanilla HTML/CSS/JS connected to the backend via an HTTP-to-TCP API Bridge (`web_api/server.py`). The entire application interface is managed in the browser. The Web UI provides login/registration forms, a lobby/waiting room dashboard, online user listings, private messaging panels, room listings, room chat panels, file listings, upload/download controls, transfer progress indicators, and status bars.
+NetCourier utilizes a Single Page Application (SPA) Web UI built on vanilla HTML/CSS/JS connected to the backend via an HTTP-to-TCP API Bridge (`src/netcourier/web/api/main.py`). The entire application interface is managed in the browser. The Web UI provides login/registration forms, a lobby/waiting room dashboard, online user listings, private messaging panels, room listings, room chat panels, file listings, upload/download controls, transfer progress indicators, and status bars.
 
 ### Normal Flow
-1. The user runs the client launcher (`python client/main.py`) which starts the local HTTP Web Server.
+1. The user runs the client launcher (`PYTHONPATH=src python -m netcourier.client.main`) which starts the local HTTP Web Server.
 2. The user navigates to `http://localhost:8080` in their web browser.
 3. The user logs in or registers via the Web UI forms.
 4. Upon authentication, the browser stores the session token and redirects the user to the Lobby/Waiting Room view.

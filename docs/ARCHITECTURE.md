@@ -16,7 +16,7 @@ The Gateway handles global coordination and control plane operations (auth, sess
 
 ```mermaid
 flowchart LR
-    Browser[Web Browser Client] <-->|HTTP / REST / Event Polling| Bridge[Web API Bridge / client/main.py]
+    Browser[Web Browser Client] <-->|HTTP / REST / Event Polling| Bridge[Web API Bridge / src/netcourier/web/api/main.py]
     Bridge <-->|TCP Socket A: Auth, PM, Room Directory| G[Gateway / Auth / Load Balancer]
     Bridge <-->|TCP Socket B: Room Chat, File Transfer| S1[Process Server S1]
     Bridge <-->|TCP Socket B: Room Chat, File Transfer| S2[Process Server S2]
@@ -39,17 +39,17 @@ flowchart LR
 Minimum running processes for a typical demonstration:
 
 ```txt
-Terminal 1:
-python gateway/main.py --client-port 9000 --backend-port 9001
+Terminal 1 (Gateway):
+PYTHONPATH=src python -m netcourier.gateway.main
 
-Terminal 2:
-python server/server.py --server-id S1 --port 9101 --gateway-port 9001
+Terminal 2 (Server S1):
+PYTHONPATH=src python -m netcourier.server.main --server-id S1 --port 9101
 
-Terminal 3:
-python server/server.py --server-id S2 --port 9102 --gateway-port 9001
+Terminal 3 (Server S2):
+PYTHONPATH=src python -m netcourier.server.main --server-id S2 --port 9102
 
-Terminal 4+:
-python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000
+Terminal 4 (Web Server / API Bridge):
+PYTHONPATH=src python -m netcourier.web.api.main
 ```
 
 ---
@@ -72,7 +72,7 @@ python client/main.py --gateway-host 127.0.0.1 --gateway-port 9000
 
 Responsibilities:
 - **Browser:** Renders the Web UI built on vanilla HTML/CSS/JS.
-- **Web API Server (`client/main.py` / `web_api/server.py`):** Acts as a bridge between the browser's REST API requests and the underlying TCP sockets connected to the backend servers.
+- **Web API Server (`src/netcourier/web/api/main.py`):** Acts as a bridge between the browser's REST API requests and the underlying TCP sockets connected to the backend servers.
 - **Authentication & PM:** Forwards login, registration, and PM requests from REST API endpoints to the Gateway over TCP.
 - **Connection Management:** Maintains background TCP socket connections to the Gateway and the currently joined Process Server per user session.
 - **Event Dispatching:** Implements long-polling (`/api/events`) to forward asynchronous socket events (new messages, user arrivals, reaction changes) to the browser in real-time.
@@ -346,10 +346,10 @@ sequenceDiagram
 
 To handle large file uploads (500MB to 1GB+) at maximum speed over localhost, NetCourier implements several optimizations:
 
-1. **Bypass UTF-8 Body Decoding:** The REST API gateway in the Web API Bridge (`web_api/server.py`) bypasses UTF-8 decoding and JSON parsing for binary upload requests (`/api/rooms/files/upload?action=chunk`), saving CPU cycles and preventing memory bloat.
+1. **Bypass UTF-8 Body Decoding:** The REST API gateway in the Web API Bridge (`src/netcourier/web/api/routes.py`) bypasses UTF-8 decoding and JSON parsing for binary upload requests (`/api/rooms/files/upload?action=chunk`), saving CPU cycles and preventing memory bloat.
 2. **TCP_NODELAY Option:** All TCP sockets (client-to-gateway, backend-to-gateway, client-to-server, and client HTTP socket connections) are configured with `TCP_NODELAY` to disable Nagle's algorithm, avoiding standard TCP ACK delays (40ms) on localhost.
-3. **Parallel Chunk Uploads:** The web client (`web_ui/app.js`) uploads file chunks concurrently using a worker pool with a maximum concurrency of 4 requests.
-4. **Out-of-Order Writes & Touch pre-allocation:** The Process Server (`server/main.py`) pre-allocates the empty target file on disk during the `UPLOAD_INIT` phase and opens it in `"r+b"` mode, writing chunks using explicit `seek(offset)`. This ensures chunks are written correctly even if they arrive out of order or concurrently.
+3. **Parallel Chunk Uploads:** The web client (`src/netcourier/web/static/app.js`) uploads file chunks concurrently using a worker pool with a maximum concurrency of 4 requests.
+4. **Out-of-Order Writes & Touch pre-allocation:** The Process Server (`src/netcourier/server/main.py`) pre-allocates the empty target file on disk during the `UPLOAD_INIT` phase and opens it in `"r+b"` mode, writing chunks using explicit `seek(offset)`. This ensures chunks are written correctly even if they arrive out of order or concurrently.
 
 ---
 
@@ -421,6 +421,6 @@ The Gateway and Process Servers run on a virtual private server (VPS). Clients c
 5. File transfers must always route through the assigned Process Server.
 6. The Gateway must not process or forward file transfer data blocks.
 7. Members of a given room must all connect to the same Process Server hosting that room.
-8. All protocol serialization and deserialization must use the `common/protocol.py` module.
+8. All protocol serialization and deserialization must use the `src/netcourier/common/protocol.py` module.
 9. Every request handler must validate the session token and ensure required fields are populated.
 10. Do not implement features outside of requirements without updating this architecture documentation.

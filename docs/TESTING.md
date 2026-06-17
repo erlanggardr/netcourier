@@ -280,7 +280,7 @@ During system evaluation, perform the following steps:
 
 ## 9. Web UI Tests
 
-- [x] Client application starts via `python client/main.py` and opens in the browser.
+- [x] Client application starts via `PYTHONPATH=src python -m netcourier.client.main` and opens in the browser.
 - [x] Login and registration succeed through the Web UI forms.
 - [x] Lobby displays online user lists, room list, PM panels, and the status bar.
 - [x] Users can create chat rooms via the web form.

@@ -369,15 +369,20 @@ Rules:
 ## 11. Web Client & API Bridge Files
 
 ```txt
-client/
-├── main.py                 # Entry point / Web Server launcher
-├── gateway_connection.py   # Gateway TCP socket handler
-└── room_connection.py      # Process Server TCP socket handler
-web_ui/
-├── index.html              # Single Page Application HTML markup
-└── app.js                  # UI event handlers, upload queue, DOM updates
-web_api/
-└── server.py               # Web API HTTP translation server
+src/netcourier/
+├── client/
+│   ├── main.py                 # Entry point / Web Server launcher
+│   ├── gateway_connection.py   # Gateway TCP socket handler
+│   └── room_connection.py      # Process Server TCP socket handler
+└── web/
+    ├── static/
+    │   ├── index.html          # Single Page Application HTML markup
+    │   └── app.js              # UI event handlers, upload queue, DOM updates
+    └── api/
+        ├── main.py             # Entry point / simple launcher
+        ├── http_server.py      # HttpServer translation server
+        ├── routes.py           # API routes handler
+        └── session.py          # Session connection state
 ```
 
 ---

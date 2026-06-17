@@ -7,9 +7,9 @@ Gunakan checklist ini sebagai roadmap implementasi.
 ## Phase 0 - Project Setup
 
 - [x] Buat struktur folder project.
-- [x] Buat `common/protocol.py`.
-- [x] Buat `common/constants.py`.
-- [x] Buat `common/errors.py`.
+- [x] Buat `src/netcourier/common/protocol.py`.
+- [x] Buat `src/netcourier/common/constants.py`.
+- [x] Buat `src/netcourier/common/errors.py`.
 - [x] Setup logging dasar.
 - [x] Setup database connection.
 - [x] Buat migration/DDL database awal.
@@ -31,7 +31,7 @@ Gunakan checklist ini sebagai roadmap implementasi.
 
 ## Phase 2A - Web Client UI & HTTP-to-TCP Bridge
 
-- [x] Buat `client/main.py` sebagai entry point server Web UI & API.
+- [x] Buat `src/netcourier/client/main.py` sebagai entry point server Web UI & API.
 - [x] Buat `src/netcourier/web/api/main.py` untuk mengelola REST API dan session bridge.
 - [x] Buat antarmuka Login/Register menggunakan HTML/CSS/JS.
 - [x] Buat antarmuka Waiting Room dan Room Chat di browser.

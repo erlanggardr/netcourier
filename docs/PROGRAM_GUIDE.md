@@ -13,8 +13,8 @@ The NetCourier application is divided into several main components, each having 
 ### 1. Web Client (Frontend / Browser UI)
 *   **Role:** Serves the visual UI to users and handles user interactions (button clicks, form submissions, file selection, and concurrent chunk slicing).
 *   **Key Files:**
-    *   [web_ui/index.html](web_ui/index.html): Layout structure for the SPA, modal inputs, file transfer cards, and emoji reaction overlays.
-    *   [web_ui/app.js](web_ui/app.js): Handles DOM updates, user actions, chunk upload loops, and polls `/api/events` for real-time events.
+    *   [src/netcourier/web/static/index.html](src/netcourier/web/static/index.html): Layout structure for the SPA, modal inputs, file transfer cards, and emoji reaction overlays.
+    *   [src/netcourier/web/static/app.js](src/netcourier/web/static/app.js): Handles DOM updates, user actions, chunk upload loops, and polls `/api/events` for real-time events.
 *   **Flow:**
     *   Runs locally inside the user's browser.
     *   Communicates with the Web API server via standard REST API requests.
@@ -24,7 +24,7 @@ The NetCourier application is divided into several main components, each having 
 *   **Role:** Translates HTTP REST requests from the browser into custom biner TCP packets and relays TCP responses back to the browser.
 *   **Key Files:**
     *   [src/netcourier/web/api/main.py](src/netcourier/web/api/main.py): Custom high-performance HTTP server that manages endpoints, SSE events, and `WebSession` wrappers for persistent sockets.
-    *   [client/main.py](client/main.py): Entry point launcher script to start the web server at port 8080.
+    *   [src/netcourier/client/main.py](src/netcourier/client/main.py): Entry point launcher script to start the web server at port 8080.
 *   **Flow:**
     *   Receives HTTP request -> maps `Session-Id` header to a `WebSession` -> forwards JSON/binary data to persistent Gateway and Process Server TCP sockets.
     *   Implements socket-level thread-safe `write_lock` to prevent binary stream interleaving during parallel chunk uploads.
@@ -32,10 +32,10 @@ The NetCourier application is divided into several main components, each having 
 ### 3. Gateway Server (Authentication & Global Directory)
 *   **Role:** Acts as the primary orchestrator for user identity, sessions, global online lists, load balancing, and private messaging routing.
 *   **Key Files:**
-    *   [gateway/main.py](gateway/main.py): Gateway socket host listening on client-facing port 9000 and backend-facing port 9001.
-    *   [gateway/auth_service.py](gateway/auth_service.py): Registers and validates users with PBKDF2 password hashing.
-    *   [gateway/presence_service.py](gateway/presence_service.py): Stores current presence states in the SQLite DB.
-    *   [gateway/load_balancer.py](gateway/load_balancer.py): Selects the least loaded active Process Server for room mapping.
+    *   [src/netcourier/gateway/main.py](src/netcourier/gateway/main.py): Gateway socket host listening on client-facing port 9000 and backend-facing port 9001.
+    *   [src/netcourier/gateway/auth_service.py](src/netcourier/gateway/auth_service.py): Registers and validates users with PBKDF2 password hashing.
+    *   [src/netcourier/gateway/presence_service.py](src/netcourier/gateway/presence_service.py): Stores current presence states in the SQLite DB.
+    *   [src/netcourier/gateway/load_balancer.py](src/netcourier/gateway/load_balancer.py): Selects the least loaded active Process Server for room mapping.
 *   **Flow:**
     *   Monitors registered Process Servers via TCP heartbeats.
     *   Acts as the central router for global user presence and global private messages.
@@ -43,7 +43,7 @@ The NetCourier application is divided into several main components, each having 
 ### 4. Process Server (Chat Rooms & File Transfers)
 *   **Role:** Manages the actual chat room sessions and coordinates high-performance chunked file transfers (upload/download).
 *   **Key Files:**
-    *   [server/main.py](server/main.py): Standalone TCP process server hosting chat, reactions, typing indicator broadcasting, and chunk parsing.
+    *   [src/netcourier/server/main.py](src/netcourier/server/main.py): Standalone TCP process server hosting chat, reactions, typing indicator broadcasting, and chunk parsing.
 *   **Flow:**
     *   Manages clients connected directly to assigned ports (e.g., S1 on port 9101).
     *   Caches active file handles in `self.transfer_progress` to reduce Disk I/O overhead.
