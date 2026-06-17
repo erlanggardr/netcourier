@@ -51,7 +51,7 @@ class TestClient:
             req = build_packet("CREATE_ROOM", {"room_name": room_name, "description": "Load Test Room"}, token=self.token)
             send_packet(self.sock, req)
             header, _ = receive_packet(self.sock)
-            if header["type"] == "ROOM_CREATED":
+            if header["type"] == "ROOM_ASSIGNED":
                 self.assigned_server = header["payload"]["server_id"]
                 return True
             return False
@@ -100,7 +100,7 @@ def client_worker(client_id, stats, lock):
             stats["joined"] += 1
     
     # Keep connection alive so the load score reflects the active client
-    time.sleep(2)
+    time.sleep(15)
     c.close()
 
 def run_lb_test(num_clients):
@@ -122,6 +122,9 @@ def run_lb_test(num_clients):
         threads.append(t)
         t.start()
         time.sleep(0.05) # Small stagger to prevent socket flood issues
+        if i == num_clients // 2:
+            print("[*] Waiting 6 seconds for server heartbeat to update load...")
+            time.sleep(6.0)
         
     for t in threads:
         t.join()

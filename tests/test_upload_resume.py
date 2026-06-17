@@ -43,9 +43,13 @@ class UploadResumeClient:
         if h["type"] == "ERROR":
             req_c = build_packet("CREATE_ROOM", {"room_name": "Resume_Room", "description": "Res"}, token=self.token)
             send_packet(self.gw_sock, req_c)
-            receive_packet(self.gw_sock)
-            send_packet(self.gw_sock, req)
             h, _ = receive_packet(self.gw_sock)
+            if h["type"] == "ROOM_ASSIGNED":
+                req_join = build_packet("JOIN_ROOM", {"room_name": "Resume_Room"}, token=self.token)
+                send_packet(self.gw_sock, req_join)
+                h_j, _ = receive_packet(self.gw_sock)
+                self.room_location = h_j["payload"]
+                return
             
         self.room_location = h["payload"]
         
@@ -57,7 +61,13 @@ class UploadResumeClient:
         receive_packet(self.room_sock)
         req_join = build_packet("JOIN_ROOM_BACKEND", {"room_name": self.room_location["room_name"]}, token=self.token)
         send_packet(self.room_sock, req_join)
-        receive_packet(self.room_sock)
+        self.room_sock.settimeout(0.5)
+        try:
+            while True:
+                receive_packet(self.room_sock)
+        except socket.timeout:
+            pass
+        self.room_sock.settimeout(None)
 
 def run_resume_test():
     print("[*] Starting Upload Resiliency Test (Disconnect & Resume)...")
@@ -90,6 +100,10 @@ def run_resume_test():
     
     send_packet(c.room_sock, req_init)
     h, _ = receive_packet(c.room_sock)
+    if h["type"] != "UPLOAD_READY":
+        print(f"[-] Failed to initialize upload. Server responded: {h}")
+        return
+        
     transfer_id = h["payload"]["transfer_id"]
     print(f"[+] Upload initialized. Transfer ID: {transfer_id}")
     

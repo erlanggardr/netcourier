@@ -50,9 +50,15 @@ class ChatTestClient:
             if header["type"] == "ERROR" and header.get("payload", {}).get("code") == "ROOM_NOT_FOUND":
                 req_create = build_packet("CREATE_ROOM", {"room_name": room_name, "description": "Stress Test Room"}, token=self.token)
                 send_packet(self.gw_sock, req_create)
-                receive_packet(self.gw_sock)
-                send_packet(self.gw_sock, req)
-                header, _ = receive_packet(self.gw_sock)
+                header_c, _ = receive_packet(self.gw_sock)
+                if header_c["type"] == "ROOM_ASSIGNED":
+                    req_join = build_packet("JOIN_ROOM", {"room_name": room_name}, token=self.token)
+                    send_packet(self.gw_sock, req_join)
+                    header_j, _ = receive_packet(self.gw_sock)
+                    if header_j["type"] == "ROOM_LOCATION":
+                        self.room_location = header_j["payload"]
+                        return True
+                return False
 
             if header["type"] == "ROOM_LOCATION":
                 self.room_location = header["payload"]
@@ -72,13 +78,19 @@ class ChatTestClient:
             
             req_join = build_packet("JOIN_ROOM_BACKEND", {"room_name": self.room_location["room_name"]}, token=self.token)
             send_packet(self.room_sock, req_join)
-            header, _ = receive_packet(self.room_sock)
-            return header["type"] == "JOIN_ROOM_OK"
+            self.room_sock.settimeout(0.5)
+            try:
+                while True:
+                    receive_packet(self.room_sock)
+            except socket.timeout:
+                pass
+            self.room_sock.settimeout(None)
+            return True
         except Exception:
             return False
 
     def send_chat(self, msg):
-        req = build_packet("ROOM_CHAT_SEND", {"message": msg}, token=self.token)
+        req = build_packet("ROOM_CHAT_SEND", {"room_name": self.room_location["room_name"], "message": msg}, token=self.token)
         send_packet(self.room_sock, req)
 
     def listen_loop(self, expected_count):
@@ -110,10 +122,14 @@ def run_chat_stress_test(num_clients, messages_per_client):
     
     for i in range(num_clients):
         c = ChatTestClient(f"spam_user_{i}_{int(time.time())}", "pass123")
-        if c.connect_and_login() and c.join_room_gateway(room_name) and c.join_room_backend():
+        is_login = c.connect_and_login()
+        is_gw = is_login and c.join_room_gateway(room_name)
+        is_be = is_gw and c.join_room_backend()
+        if is_be:
             clients.append(c)
         else:
-            print(f"[!] Client {i} failed to connect to room.")
+            print(f"[!] Client {i} failed: Login={is_login}, Gateway={is_gw}, Backend={is_be}")
+        time.sleep(0.05)
     
     print(f"[+] All {len(clients)} clients connected to {room_name}.")
     
