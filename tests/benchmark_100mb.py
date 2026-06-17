@@ -4,8 +4,8 @@ import os
 import hashlib
 import time
 import sys
-from common.protocol import send_packet, receive_packet
-from common.constants import MESSAGE_TYPES
+from netcourier.common.protocol import send_packet, receive_packet
+from netcourier.common.constants import MESSAGE_TYPES
 
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 9000

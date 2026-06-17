@@ -7,14 +7,14 @@ import sys
 import sqlite3
 from datetime import datetime, timedelta
 
-from common.constants import (
+from netcourier.common.constants import (
     DEFAULT_GATEWAY_HOST,
     DEFAULT_GATEWAY_BACKEND_PORT,
     PROJECT_ROOT
 )
-from common.protocol import receive_packet, send_packet, build_packet, build_error_packet
-from common.logging_config import setup_logging
-from common.db import get_db_connection, initialize_db
+from netcourier.common.protocol import receive_packet, send_packet, build_packet, build_error_packet
+from netcourier.common.logging_config import setup_logging
+from netcourier.common.db import get_db_connection, initialize_db
 
 import os
 import re

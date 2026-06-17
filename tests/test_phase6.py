@@ -3,7 +3,7 @@ import socket
 import json
 import time
 import threading
-from common.protocol import send_packet, receive_packet, build_packet
+from netcourier.common.protocol import send_packet, receive_packet, build_packet
 
 # --- Helper Client Class ---
 class TestClient:

@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from common.constants import DEFAULT_LOG_DIR
+from netcourier.common.constants import DEFAULT_LOG_DIR
 
 
 def setup_logging(component: str, *, log_dir: str | Path | None = None) -> logging.Logger:

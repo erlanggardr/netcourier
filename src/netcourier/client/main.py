@@ -2,7 +2,7 @@ import argparse
 import sys
 import logging
 from web_api.server import WebServer
-from common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
+from netcourier.common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
 
 def main():
     parser = argparse.ArgumentParser(description="NetCourier Web Client & API Server")

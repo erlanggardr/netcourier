@@ -1,7 +1,7 @@
 import logging
 import threading
 from datetime import datetime, timedelta
-from common.db import get_db_connection
+from netcourier.common.db import get_db_connection
 
 class BackendService:
     def __init__(self, timeout_seconds=15):

@@ -7,13 +7,13 @@ from datetime import datetime
 from itertools import count
 from typing import Any
 
-from common.constants import (
+from netcourier.common.constants import (
     EVENT_ID_PREFIX, 
     REQUEST_ID_PREFIX, 
     TIMESTAMP_FORMAT,
     HEADER_LENGTH_BYTES
 )
-from common.errors import ERROR_MESSAGES
+from netcourier.common.errors import ERROR_MESSAGES
 
 
 _request_counter = count(1)

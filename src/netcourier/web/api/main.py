@@ -5,11 +5,11 @@ import uuid
 import time
 import os
 import urllib.parse
-from client.gateway_connection import GatewayConnection
-from client.room_connection import RoomConnection
-from common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
+from netcourier.client.gateway_connection import GatewayConnection
+from netcourier.client.room_connection import RoomConnection
+from netcourier.common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
 
-WEB_UI_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web_ui")
+WEB_UI_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
 class MockApp:
     def __init__(self, session):

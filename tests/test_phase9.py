@@ -2,7 +2,7 @@ import socket
 import json
 import struct
 import time
-from common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
+from netcourier.common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
 
 def test_malformed_header():
     print("[*] Testing malformed header...")

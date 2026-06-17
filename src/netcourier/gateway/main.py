@@ -8,20 +8,20 @@ import hashlib
 import time
 from datetime import datetime, timedelta
 
-from common.constants import (
+from netcourier.common.constants import (
     DEFAULT_GATEWAY_HOST,
     DEFAULT_GATEWAY_CLIENT_PORT,
     DEFAULT_GATEWAY_BACKEND_PORT
 )
-from common.protocol import receive_packet, send_packet, build_packet, build_error_packet
-from common.db import initialize_db
-from common.logging_config import setup_logging
-from gateway.auth_service import AuthService
-from gateway.presence_service import PresenceService
-from gateway.pm_service import PMService
-from gateway.backend_service import BackendService
-from gateway.load_balancer import LoadBalancer
-from gateway.room_directory import RoomDirectoryService
+from netcourier.common.protocol import receive_packet, send_packet, build_packet, build_error_packet
+from netcourier.common.db import initialize_db
+from netcourier.common.logging_config import setup_logging
+from netcourier.gateway.auth_service import AuthService
+from netcourier.gateway.presence_service import PresenceService
+from netcourier.gateway.pm_service import PMService
+from netcourier.gateway.backend_service import BackendService
+from netcourier.gateway.load_balancer import LoadBalancer
+from netcourier.gateway.room_directory import RoomDirectoryService
 
 class RateLimiter:
     def __init__(self, limit_seconds=1.0):

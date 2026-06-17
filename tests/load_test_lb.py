@@ -3,8 +3,8 @@ import threading
 import time
 import argparse
 from collections import Counter
-from common.protocol import send_packet, receive_packet, build_packet
-from common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
+from netcourier.common.protocol import send_packet, receive_packet, build_packet
+from netcourier.common.constants import DEFAULT_GATEWAY_HOST, DEFAULT_GATEWAY_CLIENT_PORT
 
 class TestClient:
     def __init__(self, username, password):

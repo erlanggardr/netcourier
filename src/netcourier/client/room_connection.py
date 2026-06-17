@@ -1,7 +1,7 @@
 import socket
 import threading
 import logging
-from common.protocol import send_packet, receive_packet, build_packet
+from netcourier.common.protocol import send_packet, receive_packet, build_packet
 
 class RoomConnection:
     def __init__(self, host, port, app):

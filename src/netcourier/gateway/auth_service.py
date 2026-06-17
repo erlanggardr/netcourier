@@ -2,7 +2,7 @@ import hashlib
 import os
 import logging
 from datetime import datetime
-from common.db import get_db_connection
+from netcourier.common.db import get_db_connection
 
 class AuthService:
     def __init__(self):

@@ -6,7 +6,7 @@ import threading
 import os
 import hashlib
 import struct
-from common.protocol import send_packet, receive_packet, build_packet
+from netcourier.common.protocol import send_packet, receive_packet, build_packet
 
 # Reuse TestClient from phase 6, slightly modified for binary payload support
 class TestClient:

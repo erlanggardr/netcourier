@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 
-from common.constants import DEFAULT_DB_PATH, PROJECT_ROOT
+from netcourier.common.constants import DEFAULT_DB_PATH, PROJECT_ROOT
 
 
 def get_db_path() -> Path:

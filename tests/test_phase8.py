@@ -11,7 +11,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from common.protocol import build_packet, receive_packet, send_packet
+from netcourier.common.protocol import build_packet, receive_packet, send_packet
 
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 9000
